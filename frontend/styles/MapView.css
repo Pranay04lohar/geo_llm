@@ -1,0 +1,273 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.app {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+}
+
+.map-container {
+  height: 100%;
+  width: 100%;
+}
+
+.loading, .error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  text-align: center;
+  min-width: 250px;
+}
+
+.loading p, .error p {
+  font-size: 16px;
+  color: #333;
+  margin: 0 0 10px 0;
+}
+
+.error {
+  border: 2px solid #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.error p {
+  color: #d63031;
+  margin-bottom: 15px;
+}
+
+.drawing-instructions {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.controls {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  background: #ffffff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: #f5f5f5;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+  border-color: #6c757d;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #545b62;
+}
+
+.btn-warning {
+  background: #ffc107;
+  color: #212529;
+  border-color: #ffc107;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #e0a800;
+}
+
+.btn-info {
+  background: #17a2b8;
+  color: white;
+  border-color: #17a2b8;
+}
+
+.btn-info:hover:not(:disabled) {
+  background: #117a8b;
+}
+
+.btn-danger {
+  background: #dc3545;
+  color: white;
+  border-color: #dc3545;
+  font-weight: 600;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #c82333;
+  border-color: #bd2130;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-danger:active:not(:disabled) {
+  background: #bd2130;
+  border-color: #b21f2d;
+  transform: translateY(1px);
+}
+
+/* MapLibre specific styles */
+.maplibregl-map {
+  font: 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+}
+
+.maplibregl-ctrl-group button {
+  width: 30px;
+  height: 30px;
+}
+
+/* MapboxDraw specific overrides for MapLibre compatibility */
+.mapbox-gl-draw_ctrl-draw-btn {
+  background-size: 20px 20px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.mapbox-gl-draw_polygon {
+  cursor: crosshair;
+}
+
+/* Fix for CSS warnings */
+.maplibregl-ctrl-logo {
+  display: block !important;
+}
+
+/* Ensure proper rendering */
+.maplibregl-canvas-container {
+  cursor: inherit;
+}
+
+/* Custom cursor for drawing mode */
+.crosshair-cursor {
+  cursor: crosshair !important;
+}
+
+/* ROI List Styles */
+.roi-list {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  padding: 15px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  max-width: 250px;
+  z-index: 1000;
+}
+
+.roi-list h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+}
+
+.roi-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.roi-item:last-child {
+  border-bottom: none;
+}
+
+.roi-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.roi-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+
+.roi-name:hover {
+  background-color: rgba(0, 123, 255, 0.1);
+  color: #007bff;
+}
+
+.roi-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  color: #dc3545;
+  opacity: 0.7;
+  transition: all 0.2s ease;
+}
+
+.roi-delete:hover {
+  opacity: 1;
+  background: rgba(220, 53, 69, 0.15);
+  transform: scale(1.1);
+  color: #c82333;
+}
