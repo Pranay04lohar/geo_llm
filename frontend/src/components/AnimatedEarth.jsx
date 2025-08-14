@@ -37,33 +37,41 @@ const AnimatedEarth = memo(() => {
     // Earth geometry
     const geometry = new THREE.SphereGeometry(1, 64, 64)
     
-    // Earth material with texture
+    // Earth material with natural blue appearance
     const textureLoader = new THREE.TextureLoader()
+    
+    // Use a cleaner Earth texture without clouds
     const earthTexture = textureLoader.load('/textures/2k_earth_daymap.jpg')
     const bumpMap = textureLoader.load('/textures/2k_earth_normal_map.tif')
     const specularMap = textureLoader.load('/textures/2k_earth_specular_map.tif')
     
-    
+    // Create a natural Earth material matching the image
     const earthMaterial = new THREE.MeshPhongMaterial({
       map: earthTexture,
       bumpMap: bumpMap,
-      bumpScale: 0.05,
+      bumpScale: 0.03, // Slightly more surface detail for realistic continents
       specularMap: specularMap,
-      specular: new THREE.Color('grey'),
-      shininess: 5
+      specular: new THREE.Color(0x4a90e2), // Natural blue specular for oceans
+      shininess: 20, // Moderate shininess for realistic water reflection
+      color: new THREE.Color(0xffffff) // Natural colors from texture
     })
     
     const earth = new THREE.Mesh(geometry, earthMaterial)
     scene.add(earth)
     
-    
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.3)
+    // Natural lighting setup matching the image
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4) // Natural white ambient
     scene.add(ambientLight)
     
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
-    directionalLight.position.set(5, 3, 5)
+    // Main directional light from top-left (like in the image)
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2)
+    directionalLight.position.set(3, 2, 3) // Top-left lighting position
     scene.add(directionalLight)
+    
+    // Subtle fill light from opposite side
+    const fillLight = new THREE.DirectionalLight(0x4a90e2, 0.3)
+    fillLight.position.set(-2, 1, -2)
+    scene.add(fillLight)
     
     // Add to DOM
     mountRef.current.appendChild(renderer.domElement)
