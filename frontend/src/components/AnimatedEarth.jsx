@@ -1,0 +1,107 @@
+'use client'
+
+import { useEffect, useRef, memo } from 'react'
+import * as THREE from 'three'
+
+const AnimatedEarth = memo(() => {
+  const mountRef = useRef(null)
+  const sceneRef = useRef(null)
+  const rendererRef = useRef(null)
+  const animationIdRef = useRef(null)
+
+  useEffect(() => {
+    if (!mountRef.current) return
+
+    // Scene setup
+    const scene = new THREE.Scene()
+    sceneRef.current = scene
+
+    // Camera setup
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    )
+    camera.position.z = 2
+
+    // Renderer setup
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      alpha: true 
+    })
+    renderer.setSize(window.innerWidth, window.innerHeight)
+    renderer.setClearColor(0x000000, 0)
+    rendererRef.current = renderer
+
+    // Earth geometry
+    const geometry = new THREE.SphereGeometry(1, 64, 64)
+    
+    // Earth material with texture
+    const textureLoader = new THREE.TextureLoader()
+    const earthTexture = textureLoader.load('/textures/2k_earth_daymap.jpg')
+    const bumpMap = textureLoader.load('/textures/2k_earth_normal_map.tif')
+    const specularMap = textureLoader.load('/textures/2k_earth_specular_map.tif')
+    
+    
+    const earthMaterial = new THREE.MeshPhongMaterial({
+      map: earthTexture,
+      bumpMap: bumpMap,
+      bumpScale: 0.05,
+      specularMap: specularMap,
+      specular: new THREE.Color('grey'),
+      shininess: 5
+    })
+    
+    const earth = new THREE.Mesh(geometry, earthMaterial)
+    scene.add(earth)
+    
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.3)
+    scene.add(ambientLight)
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
+    directionalLight.position.set(5, 3, 5)
+    scene.add(directionalLight)
+    
+    // Add to DOM
+    mountRef.current.appendChild(renderer.domElement)
+    
+    // Animation loop
+    const animate = () => {
+      animationIdRef.current = requestAnimationFrame(animate)
+      
+      earth.rotation.y += 0.002
+      
+      renderer.render(scene, camera)
+    }
+    animate()
+    
+    // Handle resize
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight
+      camera.updateProjectionMatrix()
+      renderer.setSize(window.innerWidth, window.innerHeight)
+    }
+    window.addEventListener('resize', handleResize)
+    
+    // Cleanup
+    return () => {
+      if (animationIdRef.current) {
+        cancelAnimationFrame(animationIdRef.current)
+      }
+      window.removeEventListener('resize', handleResize)
+      if (mountRef.current && renderer.domElement) {
+        mountRef.current.removeChild(renderer.domElement)
+      }
+      renderer.dispose()
+    }
+  }, [])
+
+  return <div ref={mountRef} className="w-full h-full" />
+})
+
+AnimatedEarth.displayName = 'AnimatedEarth'
+
+export default AnimatedEarth 
