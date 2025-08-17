@@ -1,21 +1,49 @@
 """
-Core LLM Agent (MVP) using LangGraph.
+Core LLM Agent (MVP) using a simple LangGraph-style pipeline.
 
-This file defines a minimal controller agent graph that:
+This module defines a controller agent graph that orchestrates geospatial queries:
 - Accepts a user query string as input state.
-- Parses intent via a mocked LLM function.
-- Routes to one of three mocked tools:
-  - GEE_Tool (geospatial)
-  - RAG_Tool (factual/policy)
-  - WebSearch_Tool (external info)
-- Aggregates and returns a Python dict result: {"analysis": str, "roi": GeoJSON | None}.
+- Extracts location entities using LLM-based NER (DeepSeek R1 via OpenRouter).
+- Calls an LLM planner via OpenRouter to break queries into ordered subtasks 
+  and assign tools (GEE_Tool, RAG_Tool, Search_Tool).
+- Executes each subtask by dispatching to tool nodes and aggregates
+  results into a final contract: {"analysis": str, "roi": GeoJSON | None}.
 
-Notes for future integration:
-- Replace `mock_llm_parse_intent` with a real open-source LLM API call (e.g., Qwen, Llama 3, DeepSeek) and parse intent robustly.
-- Replace tool node functions with real implementations:
-  - GEE_Tool: connect to Google Earth Engine or equivalent geospatial processing.
-  - RAG_Tool: connect to your RAG pipeline (vector DB, retriever, LLM synthesize).
-  - WebSearch_Tool: connect to a search API and summarize results.
+Pipeline:
+controller -> ner (LLM location extraction) -> planner (LLM) -> execute (dispatch tools) -> aggregate
+
+LLM configuration:
+- Requires OPENROUTER_API_KEY to be set.
+- Default models can be overridden:
+  - OPENROUTER_INTENT_MODEL (used for location extraction and intent classification)
+  - OPENROUTER_PLANNER_MODEL (used for query planning and task decomposition)
+  Defaults: DeepSeek R1 free on OpenRouter (deepseek/deepseek-r1:free).
+
+Key Features:
+- Pure LLM-based location extraction 
+- Intelligent query decomposition and tool assignment
+- Context-aware tool execution with location awareness
+- All tools consume extracted locations for location-specific responses
+
+Core Functions:
+- llm_extract_locations_openrouter(): Extracts location entities using LLM NER
+- llm_generate_plan_openrouter(): Breaks queries into subtasks and assigns tools
+- controller_node(): Entry point, validates input and initializes workflow
+- roi_parser_node(): Calls LLM location extraction and enriches state
+- planner_node(): Calls LLM planner to decompose query into actionable subtasks
+- execute_plan_node(): Orchestrates tool dispatch and aggregates results
+- gee_tool_node(): Geospatial analysis tool (mocked - replace with Earth Engine)
+- rag_tool_node(): Knowledge retrieval tool (mocked - replace with vector DB + LLM)
+- websearch_tool_node(): External search tool (mocked - replace with search API)
+- aggregate_node(): Final result compilation into contract format
+
+Tool Status:
+- Currently all tools (GEE_Tool, RAG_Tool, Search_Tool) are mocked implementations
+- Replace mocked tool nodes with real implementations:
+  - GEE_Tool: connect to Earth Engine or equivalent geospatial processing
+  - RAG_Tool: connect to your RAG pipeline (vector DB, retriever, LLM synthesis)
+  - Search_Tool: connect to a search API and summarization
+- The orchestration framework is production-ready for real tool integration
 """
 
 from __future__ import annotations
@@ -23,8 +51,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 import os
 import json
+import sys
 
 # Attempt to import LangGraph; fall back to a minimal local stub if unavailable or broken
+# The stub implements only the subset of the API used in this MVP (add_node, add_edge,
+# add_conditional_edges, set_entry_point, compile, invoke). If the real library is
+# installed, it will be used instead.
 try:
     from langgraph.graph import StateGraph, END  # type: ignore
 except Exception:  # pragma: no cover
@@ -42,17 +74,17 @@ except Exception:  # pragma: no cover
             self._graph = state_graph
 
         def invoke(self, state: Dict[str, Any] | None = None) -> Dict[str, Any]:
+            # Simple synchronous runner: start at entry, step through nodes
+            # using either conditional edges or linear edges until END.
             if state is None:
                 state = {}
             current = self._graph._entry_point
             data: Dict[str, Any] = dict(state)
             while current and current != END:
                 node_fn = self._graph._nodes[current]
-                # Run the node and merge returned partial state
                 updates = node_fn(data) or {}
                 data.update(updates)
 
-                # Determine next node
                 if current in self._graph._conditional_routes:
                     route_fn, mapping = self._graph._conditional_routes[current]
                     next_key = route_fn(data)
@@ -97,18 +129,120 @@ except Exception:  # pragma: no cover
 import requests
 from dotenv import load_dotenv
 
+def llm_extract_locations_openrouter(user_query: str) -> List[Dict[str, Any]]:
+    """Extract location entities using DeepSeek R1 via OpenRouter.
+    
+    Returns a list of location dictionaries with keys: matched_name, type, confidence.
+    Falls back to empty list on error.
+    """
+    
+    # Load .env
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        backend_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+        dotenv_path = os.path.join(backend_root, ".env")
+        load_dotenv(dotenv_path, override=False)
+    except Exception:
+        pass
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
+        "X-Title": os.environ.get("OPENROUTER_APP_TITLE", "GeoLLM Location Extractor"),
+    }
+
+    system_prompt = (
+        "You are a location entity extractor for Indian geography.\n"
+        "Extract city names, state names, and geographic locations from the user query.\n"
+        "Return a JSON array of location objects with keys: 'matched_name' (extracted location), 'type' ('city' or 'state'), 'confidence' (0-100).\n"
+        "Rules:\n"
+        "- Only extract Indian cities, states, and geographic regions\n"
+        "- Use proper capitalization (e.g. 'Mumbai', 'Delhi', 'Karnataka')\n"
+        "- confidence should be 90-100 for exact matches, 70-89 for fuzzy matches\n"
+        "- Return empty array [] if no locations found\n"
+        "- JSON only, no markdown or extra text"
+    )
+
+    payload = {
+        "model": MODEL_INTENT,  # Reuse same model
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query},
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+        
+        if not content:
+            return []
+            
+        parsed = json.loads(content)
+        
+        # Handle both array format and object with "locations" key
+        if isinstance(parsed, list):
+            locations = parsed
+        elif isinstance(parsed, dict) and "locations" in parsed:
+            locations = parsed["locations"]
+        else:
+            return []
+            
+        # Validate structure
+        result = []
+        for loc in locations:
+            if (isinstance(loc, dict) and 
+                "matched_name" in loc and 
+                "type" in loc and 
+                "confidence" in loc):
+                result.append(loc)
+                
+        return result
+        
+    except Exception:
+        # Silent fallback to avoid breaking the pipeline
+        return []
+
+# Default models (override via env):
+# OPENROUTER_INTENT_MODEL, OPENROUTER_PLANNER_MODEL
+# These can be set to any OpenRouter model slug. Defaults target DeepSeek R1 free.
+MODEL_INTENT = os.environ.get("OPENROUTER_INTENT_MODEL", "deepseek/deepseek-r1:free")
+MODEL_PLANNER = os.environ.get("OPENROUTER_PLANNER_MODEL", MODEL_INTENT)
+
 
 class AgentState(TypedDict, total=False):
-    """Shared state passed between nodes in the LangGraph."""
+    """Shared state passed between nodes in the LangGraph.
+
+    The state evolves as nodes run. Keys are optional to keep the graph flexible.
+    """
 
     # Input
     query: str
 
-    # Controller output
+    # Controller output (kept for compatibility, not required by planner flow)
     intent: Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]
 
     # Intermediate parsed data
     locations: List[Dict[str, Any]]
+
+    # LLM Planning outputs
+    plan: Dict[str, Any]
+    subtasks_results: List[Dict[str, Any]]
 
     # Tool outputs (aggregated)
     analysis: str
@@ -118,162 +252,10 @@ class AgentState(TypedDict, total=False):
     evidence: List[str]
 
 
-def _heuristic_intent(user_query: str) -> Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]:
-    """Simple heuristic fallback when LLM is unavailable or returns invalid output."""
-
-    q = user_query.lower()
-    geospatial_markers = [
-        "roi",
-        "polygon",
-        "coordinates",
-        "latitude",
-        "longitude",
-        "lat",
-        "lng",
-        "map",
-        "buffer",
-        "area",
-        "draw",
-        "gee",
-    ]
-    rag_markers = [
-        "policy",
-        "policies",
-        "define",
-        "definition",
-        "explain",
-        "what is",
-        "summarize",
-        "document",
-        "guideline",
-    ]
-    web_markers = [
-        "weather",
-        "latest",
-        "today",
-        "update",
-        "news",
-        "price",
-        "live",
-        "external",
-        "search",
-    ]
-
-    if any(marker in q for marker in geospatial_markers):
-        return "GEE_Tool"
-    if any(marker in q for marker in rag_markers):
-        return "RAG_Tool"
-    if any(marker in q for marker in web_markers):
-        return "WebSearch_Tool"
-    return "WebSearch_Tool"
-
-
-def plan_user_query(user_query: str) -> Dict[str, Any]:
-    """Generate an execution plan for the given user query.
-
-    Attempts to leverage Qwen3 via OpenRouter for high-quality planning. Falls
-    back to heuristics when the API is unavailable or returns invalid output.
-    """
-
-    # First, try LLM powered planning
-    llm_plan = llm_generate_plan_openrouter(user_query)
-    if llm_plan is not None:
-        return llm_plan
-
-    # ---- Heuristic fallback below ----
-
-    q = user_query.lower()
-
-    geospatial_needed = any(kw in q for kw in (
-        "forest cover",
-        "land cover",
-        "roi",
-        "polygon",
-        "coordinates",
-        "satellite",
-        "gee",
-        "map",
-        "change in",  # general change queries often geospatial
-    ))
-
-    # Detect policy / factual docs segment (RAG)
-    policy_needed = any(kw in q for kw in (
-        "policy",
-        "policies",
-        "law",
-        "laws",
-        "act",
-        "regulation",
-        "deforestation",
-        "summarize",
-    ))
-
-    # Detect demographic / population info request – could be answered via RAG or Search
-    population_needed = "population" in q or "demograph" in q
-
-    # Detect explicit timeliness keywords for Search_Tool
-    search_needed = any(kw in q for kw in ("latest", "today", "news", "update"))
-
-    subtasks: List[Dict[str, Any]] = []
-    tools: List[str] = []
-    step = 1
-
-    if geospatial_needed:
-        subtasks.append({"step": step, "task": "Compute forest cover change / geospatial analysis"})
-        if "GEE_Tool" not in tools:
-            tools.append("GEE_Tool")
-        step += 1
-
-    if policy_needed:
-        subtasks.append({"step": step, "task": "Retrieve and summarize deforestation policies"})
-        if "RAG_Tool" not in tools:
-            tools.append("RAG_Tool")
-        step += 1
-
-    if population_needed:
-        subtasks.append({"step": step, "task": "Fetch population statistics for Uttarakhand"})
-        if "Search_Tool" not in tools:
-            tools.append("Search_Tool")
-        step += 1
-
-    # Handle catch-all external search if keywords indicate freshness
-    if search_needed and "Search_Tool" not in tools:
-        subtasks.append({"step": step, "task": "Search external information sources"})
-        tools.append("Search_Tool")
-
-    if not tools:
-        # Fallback – cannot determine, default to Search
-        subtasks = [{"step": 1, "task": "Search external information sources"}]
-        tools = ["Search_Tool"]
-
-    # Build reasoning string
-    reasoning_parts = []
-    if geospatial_needed:
-        reasoning_parts.append("geospatial analysis requested")
-    if policy_needed:
-        reasoning_parts.append("policy/factual information requested")
-    if population_needed:
-        reasoning_parts.append("demographic info requested")
-    if search_needed:
-        reasoning_parts.append("timely external info requested")
-    if not reasoning_parts:
-        reasoning_parts.append("unable to classify – defaulting to search")
-
-    return {
-        "subtasks": subtasks,
-        "tools_to_use": tools,
-        "reasoning": "; ".join(reasoning_parts),
-    }
-
-
 def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]:
-    """Call OpenRouter with Qwen3 235B A22B (free) to parse intent.
+    """Call OpenRouter model to parse intent.
 
     Expects OPENROUTER_API_KEY in environment. Returns one of the 3 tool names.
-    Falls back to heuristic on error or invalid output.
-
-    API: https://openrouter.ai (OpenAI-compatible chat completions)
-    Model: qwen/qwen3-235b-a22b:free
     """
 
     # Load .env from backend repo root when running as a script
@@ -288,28 +270,28 @@ def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Too
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        return _heuristic_intent(user_query)
+        raise RuntimeError("OPENROUTER_API_KEY missing – intent classification requires OpenRouter.")
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        # Optional, but nice for dashboards
+        # Optional, for dashboards/analytics
         "HTTP-Referer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
         "X-Title": os.environ.get("OPENROUTER_APP_TITLE", "GeoLLM Intent Router"),
     }
     system_prompt = (
         "You are an intent classifier for a geospatial assistant. "
-        "Given a user query, respond ONLY with a compact JSON object of the form\\n"
-        "{\"intent\": \"GEE_Tool|RAG_Tool|WebSearch_Tool\"}.\\n"
-        "Rules:\\n"
-        "- GEE_Tool: geospatial tasks (ROI, polygon, coordinates, lat/lng, map ops).\\n"
-        "- RAG_Tool: factual/policy/definition or documents-based.\\n"
-        "- WebSearch_Tool: external, live, or timely info (weather, latest, today, update, news).\\n"
+        "Given a user query, respond ONLY with a compact JSON object of the form\n"
+        "{\"intent\": \"GEE_Tool|RAG_Tool|WebSearch_Tool\"}.\n"
+        "Rules:\n"
+        "- GEE_Tool: geospatial tasks (ROI, polygon, coordinates, lat/lng, map ops).\n"
+        "- RAG_Tool: factual/policy/definition or documents-based.\n"
+        "- WebSearch_Tool: external, live, or timely info (weather, latest, today, update, news).\n"
         "No extra text."
     )
     payload = {
-        "model": "qwen/qwen3-235b-a22b:free",
+        "model": MODEL_INTENT,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_query},
@@ -334,13 +316,14 @@ def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Too
         intent = parsed.get("intent")
         if intent in {"GEE_Tool", "RAG_Tool", "WebSearch_Tool"}:
             return intent  # type: ignore[return-value]
-        return _heuristic_intent(user_query)
-    except Exception:
-        return _heuristic_intent(user_query)
+        raise RuntimeError("Intent classifier returned invalid result.")
+    except Exception as exc:
+        # Surface LLM/HTTP failures to caller – we deliberately avoid fallbacks here
+        raise RuntimeError("Intent classification via LLM failed.") from exc
 
 
 def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # noqa: C901
-    """Generate subtask plan via OpenRouter Qwen3 (if available).
+    """Generate subtask plan via OpenRouter model (if available).
 
     Returns parsed dict on success, or None on error/invalid.
     """
@@ -372,7 +355,7 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
         "1) GEE_Tool → for geospatial analysis (maps, ROI, satellite data)\n"
         "2) RAG_Tool → for factual/knowledge-based queries (laws, government reports, static datasets)\n"
         "3) Search_Tool → for external information not in our internal KB (news, latest updates)\n\n"
-        "Given a user query, output a JSON with keys: 'subtasks' (list of {{step, task}}), 'tools_to_use' (list of tool names), 'reasoning' (short string).\n"
+        "Given a user query, output a JSON with keys: 'subtasks' (list of {step, task}), 'tools_to_use' (list of tool names), 'reasoning' (short string).\n"
         "Output rules:\n"
         "- JSON ONLY. No markdown, no code fences.\n"
         "- tools_to_use may include one or more of: GEE_Tool, RAG_Tool, Search_Tool.\n"
@@ -381,7 +364,7 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
     )
 
     payload = {
-        "model": "qwen/qwen3-235b-a22b:free",
+        "model": MODEL_PLANNER,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_query},
@@ -413,55 +396,146 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
             return parsed  # type: ignore[return-value]
         return None
     except Exception:
+        # Signal to caller; no auto-fallback from here
         return None
 
 
 def controller_node(state: AgentState) -> Dict[str, Any]:
-    """Controller node: decides which tool to call based on intent parsed by a mocked LLM."""
+    """Controller node: validates input and initializes evidence.
+
+    Intent classification is not required for the planner-driven flow and is not
+    executed here to avoid unnecessary LLM calls/rate limits.
+    """
 
     user_query = state.get("query", "").strip()
     if not user_query:
         return {
-            "intent": "RAG_Tool",
             "analysis": "Empty query provided. Nothing to analyze.",
             "roi": None,
             "evidence": ["controller:empty_query"],
         }
 
-    # Use OpenRouter Qwen model; fallback to heuristic if needed
-    intent = llm_parse_intent_openrouter(user_query)
     evidence = list(state.get("evidence", []))
-    evidence.append(f"controller:intent={intent}")
-    return {"intent": intent, "evidence": evidence}
+    evidence.append("controller:ok")
+    return {"evidence": evidence}
+
+
+def planner_node(state: AgentState) -> Dict[str, Any]:
+    """Call the LLM planner to break the query into subtasks and assign tools.
+
+    The resulting JSON is stored under state["plan"].
+    """
+
+    user_query = state.get("query", "").strip()
+    plan = llm_generate_plan_openrouter(user_query)
+    if not plan:
+        raise RuntimeError("Planner LLM unavailable or returned invalid output.")
+
+    evidence = list(state.get("evidence", []))
+    evidence.append("planner:ok")
+    return {"plan": plan, "evidence": evidence}
+
+
+def execute_plan_node(state: AgentState) -> Dict[str, Any]:
+    """Execute the planned subtasks by dispatching to the appropriate tools.
+
+    This node orchestrates multiple tools in a single step for the MVP. It
+    consumes the LLM-generated plan, runs each subtask with the mapped tool, and
+    aggregates an analysis summary and an optional ROI.
+    """
+
+    plan: Dict[str, Any] = state.get("plan", {})
+    subtasks: List[Dict[str, Any]] = plan.get("subtasks", [])
+
+    # Prefer locations already parsed by roi_parser_node (now LLM-based); otherwise attempt parsing once
+    working_state: AgentState = dict(state)
+    parsed_locations: List[Dict[str, Any]] = list(state.get("locations", []) or [])
+    if not parsed_locations:
+        user_query = state.get("query", "")
+        parsed_locations = llm_extract_locations_openrouter(user_query)
+        if parsed_locations:
+            working_state["locations"] = parsed_locations
+
+    results: List[Dict[str, Any]] = []
+    combined_analysis_parts: List[str] = []
+    final_roi: Optional[Dict[str, Any]] = None
+
+    # Helper to call a tool node and capture outputs
+    def _run_tool(tool_name: str, current_state: AgentState) -> Dict[str, Any]:
+        if tool_name == "GEE_Tool":
+            return gee_tool_node(current_state)
+        if tool_name == "RAG_Tool":
+            return rag_tool_node(current_state)
+        if tool_name == "Search_Tool":
+            return websearch_tool_node(current_state)
+        raise ValueError(f"Unknown tool: {tool_name}")
+
+    # Determine tool for each subtask using explicit mentions or fallback to tools_to_use
+    tools_hint: List[str] = plan.get("tools_to_use", [])
+
+    for sub in subtasks:
+        step = sub.get("step")
+        task_text: str = sub.get("task", "")
+        task_lower = task_text.lower()
+
+        # Prefer explicit tool mentions in the task text
+        if "gee_tool" in task_lower:
+            tool = "GEE_Tool"
+        elif "rag_tool" in task_lower:
+            tool = "RAG_Tool"
+        elif "search_tool" in task_lower:
+            tool = "Search_Tool"
+        else:
+            # Fallback: first tool from tools_to_use, else default to Search_Tool
+            tool = tools_hint[0] if tools_hint else "Search_Tool"
+
+        tool_output = _run_tool(tool, working_state)
+
+        # Collect analysis and ROI
+        analysis_piece = tool_output.get("analysis") or f"Executed {tool}"
+        combined_analysis_parts.append(f"Step {step}: {analysis_piece}")
+        if tool == "GEE_Tool" and tool_output.get("roi") is not None:
+            final_roi = tool_output.get("roi")
+
+        results.append({
+            "step": step,
+            "tool": tool,
+            "task": task_text,
+            "output": {"analysis": tool_output.get("analysis"), "roi": tool_output.get("roi")},
+        })
+
+    evidence = list(state.get("evidence", []))
+    evidence.append("executor:ok")
+    if parsed_locations or state.get("locations"):
+        evidence.append("llm_ner:found")
+    else:
+        evidence.append("llm_ner:none")
+
+    return {
+        "subtasks_results": results,
+        "analysis": "\n".join(combined_analysis_parts),
+        "roi": final_roi,
+        "evidence": evidence,
+    }
 
 
 def roi_parser_node(state: AgentState) -> Dict[str, Any]:
-    """Parse the region of interest (ROI) or location entities from the user query.
+    """Extract location entities from the user query using LLM (DeepSeek R1).
 
-    This represents a *sub-task* in the geospatial pipeline. It uses the fuzzy
-    ROI parser to detect city/state names mentioned in the query. Down-stream
+    This represents a *sub-task* in the geospatial pipeline. It uses LLM-based NER
+    to detect city/state names mentioned in the query. Down-stream
     nodes (e.g. the actual GEE processing) can then leverage this structured
     information.
     """
 
-    try:
-        from .roi_parser import roi_parser  # local import to avoid frontend deps
-    except Exception:
-        roi_parser = None  # type: ignore
-
     user_query = state.get("query", "")
-    locations: List[Dict[str, Any]] = []
-    if roi_parser:
-        try:
-            locations = roi_parser(user_query) or []  # type: ignore[arg-type]
-        except Exception:
-            locations = []
+    locations = llm_extract_locations_openrouter(user_query)
 
     evidence = list(state.get("evidence", []))
     if locations:
-        evidence.append("roi_parser:found")
+        evidence.append("llm_ner:found")
     else:
-        evidence.append("roi_parser:none")
+        evidence.append("llm_ner:none")
 
     # We purposefully do *NOT* set analysis/roi here – the downstream GEE tool
     # remains responsible for producing those. We only enrich state with
@@ -522,8 +596,15 @@ def rag_tool_node(state: AgentState) -> Dict[str, Any]:
     Replace this with your RAG pipeline (retriever + LLM synthesis).
     """
 
+    locations = state.get("locations", [])
+    if locations:
+        location_names = [loc.get("matched_name", "Unknown") for loc in locations]
+        location_text = f"related to {', '.join(location_names)} "
+    else:
+        location_text = ""
+
     analysis = (
-        "Identified factual/policy query. Returning a mocked summary. "
+        f"Identified factual/policy query {location_text}. Returning a mocked summary. "
         "Integrate vector search and LLM synthesis here."
     )
     evidence = list(state.get("evidence", []))
@@ -537,8 +618,15 @@ def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
     Replace this with a real web search API and summarization.
     """
 
+    locations = state.get("locations", [])
+    if locations:
+        location_names = [loc.get("matched_name", "Unknown") for loc in locations]
+        location_text = f"for {', '.join(location_names)} "
+    else:
+        location_text = ""
+
     analysis = (
-        "Identified external information request. Returning a mocked web summary. "
+        f"Identified external information request {location_text}. Returning a mocked web summary. "
         "Integrate web search and summarization here."
     )
     evidence = list(state.get("evidence", []))
@@ -557,47 +645,28 @@ def aggregate_node(state: AgentState) -> Dict[str, Any]:
         "roi": state.get("roi", None),
     }
 
+
 def build_graph() -> Any:
-    """Build and compile the LangGraph for the controller agent with sub-task nodes."""
+    """Build and compile the LangGraph for the controller agent with planning and execution.
+
+    Node wiring:
+      controller -> ner (LLM location extraction) -> planner -> execute -> aggregate -> END
+    """
 
     graph = StateGraph(AgentState)
 
-    # High-level nodes
     graph.add_node("controller", controller_node)
-    graph.add_node("roi", roi_parser_node)  # new sub-task node
-    graph.add_node("gee", gee_tool_node)
-    graph.add_node("rag", rag_tool_node)
-    graph.add_node("web", websearch_tool_node)
+    graph.add_node("ner", roi_parser_node)  # Renamed for clarity but same function
+    graph.add_node("planner", planner_node)
+    graph.add_node("execute", execute_plan_node)
     graph.add_node("aggregate", aggregate_node)
 
     graph.set_entry_point("controller")
 
-    # Decide which high-level branch to take
-    def route(state: AgentState) -> str:
-        intent = state.get("intent", "WebSearch_Tool")
-        if intent == "GEE_Tool":
-            return "roi"  # first sub-task in geospatial branch
-        if intent == "RAG_Tool":
-            return "rag"
-        return "web"
-
-    graph.add_conditional_edges(
-        "controller",
-        route,
-        {
-            "roi": "roi",
-            "rag": "rag",
-            "web": "web",
-        },
-    )
-
-    # Geospatial branch sub-flow
-    graph.add_edge("roi", "gee")
-
-    # Linear edges to aggregation
-    graph.add_edge("gee", "aggregate")
-    graph.add_edge("rag", "aggregate")
-    graph.add_edge("web", "aggregate")
+    graph.add_edge("controller", "ner")
+    graph.add_edge("ner", "planner")
+    graph.add_edge("planner", "execute")
+    graph.add_edge("execute", "aggregate")
     graph.add_edge("aggregate", END)
 
     return graph.compile()
@@ -633,233 +702,17 @@ def run_sample_queries() -> None:
 if __name__ == "__main__":
     import sys
 
+    # CLI mode:
+    # - Default: run sample queries through the full graph
+    # - --plan "...": only run the LLM planner for an ad-hoc query and print the plan JSON
     if len(sys.argv) > 1 and sys.argv[1] == "--plan":
         query = " ".join(sys.argv[2:]) or input("Enter query: ")
-        plan = plan_user_query(query)
-        print(json.dumps(plan, indent=2))
+        plan = llm_generate_plan_openrouter(query)
+        if plan:
+            print(json.dumps(plan, indent=2))
+        else:
+            print("Could not generate plan via LLM.")
     else:
         run_sample_queries()
 
 
-
-# """
-# Core LLM Agent (Qwen3-only, no fallback).
-
-# This agent:
-# - Accepts a user query.
-# - Uses Qwen-3 (via OpenRouter API) to:
-#   • Parse intent
-#   • Generate execution plan (subtasks + tools + reasoning)
-# - Routes query to correct tool node via LangGraph.
-# - Returns result {"analysis": str, "roi": GeoJSON | None}.
-
-# Tools supported:
-# - GEE_Tool (geospatial)
-# - RAG_Tool (policy/factual knowledge)
-# - WebSearch_Tool (external live info)
-# """
-
-# from __future__ import annotations
-# import os, json, requests
-# from typing import Any, Dict, List, Literal, Optional, TypedDict
-# from dotenv import load_dotenv
-
-# # ---- LangGraph fallback stub (minimal local impl) ----
-# try:
-#     from langgraph.graph import StateGraph, END
-# except Exception:
-#     END = "__END__"
-#     class _CompiledGraph:
-#         def __init__(self, sg): self._graph = sg
-#         def invoke(self, state: Dict[str, Any] | None = None) -> Dict[str, Any]:
-#             state = state or {}
-#             current = self._graph._entry_point
-#             data = dict(state)
-#             while current and current != END:
-#                 node_fn = self._graph._nodes[current]
-#                 updates = node_fn(data) or {}
-#                 data.update(updates)
-#                 if current in self._graph._conditional_routes:
-#                     route_fn, mapping = self._graph._conditional_routes[current]
-#                     nxt = route_fn(data)
-#                     current = mapping.get(nxt, None)
-#                 else:
-#                     current = self._graph._edges.get(current)
-#             return data
-#     class _StateGraph:
-#         def __init__(self, state_type: type): 
-#             self._nodes, self._edges, self._conditional_routes = {}, {}, {}
-#             self._entry_point = None
-#         def add_node(self, name: str, fn): self._nodes[name] = fn
-#         def set_entry_point(self, name: str): self._entry_point = name
-#         def add_edge(self, f: str, t: str): self._edges[f] = t
-#         def add_conditional_edges(self, f: str, rf, m: Dict[str, str]): self._conditional_routes[f] = (rf, m)
-#         def compile(self): return _CompiledGraph(self)
-#     StateGraph = _StateGraph
-
-# # ---- State definition ----
-# class AgentState(TypedDict, total=False):
-#     query: str
-#     intent: Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]
-#     subtasks: List[Dict[str, Any]]
-#     analysis: str
-#     roi: Optional[Dict[str, Any]]
-#     evidence: List[str]
-
-# # ---- OpenRouter call utils ----
-# def _call_openrouter(model: str, system_prompt: str, user_msg: str, api_title: str) -> Dict[str, Any]:
-#     # load env
-#     try:
-#         current_dir = os.path.dirname(os.path.abspath(__file__))
-#         backend_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-#         dotenv_path = os.path.join(backend_root, ".env")
-#         load_dotenv(dotenv_path, override=False)
-#     except Exception: pass
-
-#     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-#     if not api_key:
-#         raise RuntimeError("OPENROUTER_API_KEY missing in environment.")
-
-#     url = "https://openrouter.ai/api/v1/chat/completions"
-#     headers = {
-#         "Authorization": f"Bearer {api_key}",
-#         "Content-Type": "application/json",
-#         "HTTP-Referer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
-#         "X-Title": api_title,
-#     }
-#     payload = {
-#         "model": model,
-#         "messages": [
-#             {"role": "system", "content": system_prompt},
-#             {"role": "user", "content": user_msg},
-#         ],
-#         "temperature": 0,
-#         "response_format": {"type": "json_object"},
-#     }
-#     resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
-#     resp.raise_for_status()
-#     data = resp.json()
-#     content = (
-#         data.get("choices", [{}])[0]
-#         .get("message", {})
-#         .get("content", "")
-#         .strip()
-#     )
-#     if not content:
-#         raise RuntimeError("Empty response from Qwen.")
-#     return json.loads(content)
-
-# # ---- Intent classification ----
-# def llm_parse_intent(user_query: str) -> str:
-#     system_prompt = (
-#         "You are an intent classifier for a geospatial assistant. "
-#         "Choose the SINGLE most relevant tool for the user's query. "
-#         "Return ONLY JSON of the form {\"intent\": \"GEE_Tool\"} "
-#         "or {\"intent\": \"RAG_Tool\"} or {\"intent\": \"WebSearch_Tool\"}.\n"
-#         "Rules:\n"
-#         "- GEE_Tool: geospatial tasks (ROI, satellite, map).\n"
-#         "- RAG_Tool: factual, policy, documents.\n"
-#         "- WebSearch_Tool: live, timely, external info (news, weather, latest).\n"
-#         "Never combine tools, never output multiple options, never use the '|' symbol.\n"
-#     )
-#     parsed = _call_openrouter(
-#         "qwen/qwen3-235b-a22b:free",
-#         system_prompt,
-#         user_query,
-#         "GeoLLM Intent Router"
-#     )
-#     intent = parsed.get("intent")
-#     if intent not in {"GEE_Tool", "RAG_Tool", "WebSearch_Tool"}:
-#         raise RuntimeError(f"Invalid intent from Qwen: {parsed}")
-#     return intent
-
-
-# # ---- Plan generator ----
-# def llm_generate_plan(user_query: str) -> Dict[str, Any]:
-#     system_prompt = (
-#         "You are a tool planner for a geospatial assistant.\n"
-#         "Tools:\n"
-#         "1) GEE_Tool → geospatial analysis (maps, ROI, satellite)\n"
-#         "2) RAG_Tool → factual/knowledge-based (laws, policies)\n"
-#         "3) WebSearch_Tool → external info (news, latest)\n\n"
-#         "Output JSON with keys:\n"
-#         "- subtasks: list of {step:int, task:str, tool:str}\n"
-#         "- tools_to_use: list of tool names\n"
-#         "- reasoning: short string (<=25 words)\n"
-#         "Rules:\n"
-#         "- JSON only, no markdown\n"
-#         "- Each subtask MUST include 'tool'\n"
-#     )
-#     parsed = _call_openrouter(
-#         "qwen/qwen3-235b-a22b:free",
-#         system_prompt,
-#         user_query,
-#         "GeoLLM Planner"
-#     )
-#     if not all(k in parsed for k in ("subtasks", "tools_to_use", "reasoning")):
-#         raise RuntimeError(f"Invalid plan from Qwen: {parsed}")
-#     return parsed
-
-# # ---- Graph nodes ----
-# def controller_node(state: AgentState) -> Dict[str, Any]:
-#     user_query = state.get("query", "").strip()
-#     if not user_query:
-#         return {"intent": "RAG_Tool", "analysis": "Empty query.", "roi": None}
-
-#     intent = llm_parse_intent(user_query)
-#     plan = llm_generate_plan(user_query)
-#     evidence = [f"intent={intent}", f"plan={json.dumps(plan)}"]
-#     return {"intent": intent, "subtasks": plan.get("subtasks", []), "evidence": evidence}
-
-# def gee_tool_node(state: AgentState) -> Dict[str, Any]:
-#     analysis = "Executed geospatial analysis (mock). Replace with real GEE pipeline."
-#     roi = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[72.8,19.0],[72.9,19.0],[72.9,19.1],[72.8,19.1],[72.8,19.0]]]}, "properties":{}}
-#     return {"analysis": analysis, "roi": roi}
-
-# def rag_tool_node(state: AgentState) -> Dict[str, Any]:
-#     return {"analysis": "Executed RAG (mock). Replace with retriever+LLM synthesis.", "roi": None}
-
-# def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
-#     return {"analysis": "Executed WebSearch (mock). Replace with real search API.", "roi": None}
-
-# def aggregate_node(state: AgentState) -> Dict[str, Any]:
-#     return {"analysis": state.get("analysis",""), "roi": state.get("roi")}
-
-# # ---- Build graph ----
-# def build_graph():
-#     graph = StateGraph(AgentState)
-#     graph.add_node("controller", controller_node)
-#     graph.add_node("gee", gee_tool_node)
-#     graph.add_node("rag", rag_tool_node)
-#     graph.add_node("web", websearch_tool_node)
-#     graph.add_node("aggregate", aggregate_node)
-#     graph.set_entry_point("controller")
-
-#     def route(state: AgentState) -> str:
-#         intent = state.get("intent")
-#         if intent == "GEE_Tool": return "gee"
-#         if intent == "RAG_Tool": return "rag"
-#         return "web"
-
-#     graph.add_conditional_edges("controller", route, {"gee":"gee","rag":"rag","web":"web"})
-#     graph.add_edge("gee","aggregate"); graph.add_edge("rag","aggregate"); graph.add_edge("web","aggregate")
-#     graph.add_edge("aggregate", END)
-#     return graph.compile()
-
-# # ---- Example run ----
-# if __name__ == "__main__":
-#     import sys
-#     app = build_graph()
-#     if len(sys.argv) > 1:
-#         q = " ".join(sys.argv[1:])
-#         res = app.invoke({"query": q})
-#         print(json.dumps(res, indent=2))
-#     else:
-#         for q in [
-#             "Analyze urban sprawl in Bengaluru over 15 years and relate to water scarcity",
-#             "Summarize India's forest conservation policies",
-#             "Latest news about floods in Assam"
-#         ]:
-#             print("\n=== Query:", q, "===")
-#             res = app.invoke({"query": q})
-#             print(json.dumps(res, indent=2))
