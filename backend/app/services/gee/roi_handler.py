@@ -13,17 +13,18 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
-# Try to import geocoding libraries
+# Import geocoding libraries
 try:
-    from geopy.geocoders import GoogleV3
+    from geopy.geocoders import GoogleV3, Nominatim
     from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
     GEOPY_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    print(f"Warning: Geopy not available: {e}")
     GEOPY_AVAILABLE = False
-    # Mock geocoder for development
+    
+    # Fallback mock for when geopy is not available
     class MockGeocoder:
         def geocode(self, query, timeout=None):
-            # Return mock coordinates for common Indian cities
             mock_coords = {
                 "mumbai": (19.0760, 72.8777),
                 "delhi": (28.7041, 77.1025),
@@ -45,7 +46,6 @@ except ImportError:
                     return MockLocation(coords[0], coords[1])
             return None
     
-    # Mock exception classes
     class GeocoderTimedOut(Exception):
         pass
     
@@ -53,6 +53,7 @@ except ImportError:
         pass
     
     GoogleV3 = MockGeocoder
+    Nominatim = MockGeocoder
 
 
 class ROIHandler:
@@ -72,7 +73,7 @@ class ROIHandler:
         }
         
     def _setup_geocoder(self):
-        """Setup geocoding client with API key."""
+        """Setup geocoding client with API key or fallback to free service."""
         try:
             # Load .env from backend root
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -82,14 +83,23 @@ class ROIHandler:
         except Exception:
             pass
             
+        if not GEOPY_AVAILABLE:
+            # Use mock geocoder when geopy is not available
+            self.geocoder = MockGeocoder()
+            self.geocoder_type = "mock"
+            return
+            
         # Get Google Maps API key for geocoding
         api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
         
-        if GEOPY_AVAILABLE and api_key:
+        if api_key:
+            # Use Google geocoding with API key (most accurate)
             self.geocoder = GoogleV3(api_key=api_key)
+            self.geocoder_type = "google"
         else:
-            # Use mock geocoder for development
-            self.geocoder = MockGeocoder()
+            # Fallback to free Nominatim service (no API key required)
+            self.geocoder = Nominatim(user_agent="geollm-roi-handler")
+            self.geocoder_type = "nominatim"
             
     def extract_roi_from_locations(self, locations: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """

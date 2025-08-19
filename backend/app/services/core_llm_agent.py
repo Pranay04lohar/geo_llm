@@ -544,50 +544,81 @@ def roi_parser_node(state: AgentState) -> Dict[str, Any]:
 
 
 def gee_tool_node(state: AgentState) -> Dict[str, Any]:
-    """Mocked GEE tool invocation that now consumes parsed locations.
+    """Real Google Earth Engine tool invocation using the GEE package.
 
-    Replace this with a real geospatial pipeline (e.g., Earth Engine). For the
-    MVP we fabricate a square ROI. If locations were parsed by the previous
-    node, we simply reference them in the analysis for demonstration.
+    This function integrates with the real GEE infrastructure to perform
+    geospatial analysis based on user queries and extracted locations.
     """
-
-    # Default example center near Mumbai (lng, lat)
-    center_lng, center_lat = 72.8777, 19.0760
-
-    # Build a small square polygon (~0.01° offsets for demo only)
-    d = 0.01
-    ring = [
-        [center_lng - d, center_lat - d],
-        [center_lng + d, center_lat - d],
-        [center_lng + d, center_lat + d],
-        [center_lng - d, center_lat + d],
-        [center_lng - d, center_lat - d],
-    ]
-
-    roi: Dict[str, Any] = {
-        "type": "Feature",
-        "properties": {
-            "name": "Mock ROI (square)",
-            "source_locations": [loc.get("matched_name") for loc in state.get("locations", [])],
-        },
-        "geometry": {"type": "Polygon", "coordinates": [ring]},
-    }
-
-    if state.get("locations"):
-        analysis_prefix = (
-            "Parsed location entities – generating a mock ROI around the first location. "
+    
+    try:
+        # Import the real GEE tool
+        from backend.app.services.gee import GEETool
+        
+        # Initialize the GEE tool
+        gee_tool = GEETool()
+        
+        # Extract inputs from state
+        query = state.get("query", "")
+        locations = state.get("locations", [])
+        evidence = list(state.get("evidence", []))
+        
+        # Process the query using real GEE
+        result = gee_tool.process_query(
+            query=query,
+            locations=locations,
+            evidence=evidence
         )
-    else:
-        analysis_prefix = "No explicit location detected – defaulting to a mock ROI near Mumbai. "
+        
+        return {
+            "analysis": result.get("analysis", "GEE analysis completed."),
+            "roi": result.get("roi"),
+            "evidence": result.get("evidence", evidence)
+        }
+        
+    except ImportError:
+        # Fallback to mock implementation if GEE components are not available
+        evidence = list(state.get("evidence", []))
+        evidence.append("gee_tool:fallback_to_mock")
+        
+        # Default example center near Mumbai (lng, lat)
+        center_lng, center_lat = 72.8777, 19.0760
 
-    analysis = (
-        analysis_prefix
-        + "Replace with real GEE processing (e.g., buffering, land-cover stats)."
-    )
+        # Build a small square polygon (~0.01° offsets for demo only)
+        d = 0.01
+        ring = [
+            [center_lng - d, center_lat - d],
+            [center_lng + d, center_lat - d],
+            [center_lng + d, center_lat + d],
+            [center_lng - d, center_lat + d],
+            [center_lng - d, center_lat - d],
+        ]
 
-    evidence = list(state.get("evidence", []))
-    evidence.append("gee_tool:mock_square_roi")
-    return {"analysis": analysis, "roi": roi, "evidence": evidence}
+        roi: Dict[str, Any] = {
+            "type": "Feature",
+            "properties": {
+                "name": "Fallback ROI (square)",
+                "source_locations": [loc.get("matched_name") for loc in state.get("locations", [])],
+            },
+            "geometry": {"type": "Polygon", "coordinates": [ring]},
+        }
+
+        analysis = (
+            "Fallback to mock GEE implementation due to import error. "
+            "Please ensure GEE dependencies are properly installed and configured."
+        )
+
+        return {"analysis": analysis, "roi": roi, "evidence": evidence}
+        
+    except Exception as e:
+        # Handle any other errors gracefully
+        evidence = list(state.get("evidence", []))
+        evidence.append(f"gee_tool:error_{str(e)[:30]}")
+        
+        return {
+            "analysis": f"GEE tool encountered an error: {str(e)}",
+            "roi": None,
+            "evidence": evidence
+        }
 
 
 def rag_tool_node(state: AgentState) -> Dict[str, Any]:
