@@ -33,13 +33,20 @@ class GEETool:
         # Import here to avoid circular imports
         from .gee_client import GEEClient
         from .roi_handler import ROIHandler
-        from .query_analyzer import QueryAnalyzer
+        # Always use hybrid analyzer as default (fallback to regex-only internally)
+        try:
+            from .hybrid_query_analyzer import HybridQueryAnalyzer
+            self.query_analyzer = HybridQueryAnalyzer()  # Auto-detects OpenRouter key
+        except ImportError:
+            # Ultimate fallback if hybrid analyzer is not available
+            from .query_analyzer import QueryAnalyzer
+            self.query_analyzer = QueryAnalyzer()
         from .script_generator import ScriptGenerator
         from .result_processor import ResultProcessor
         
         self.client = GEEClient()
         self.roi_handler = ROIHandler()
-        self.query_analyzer = QueryAnalyzer()
+        # Query analyzer set up above with hybrid capabilities
         self.script_generator = ScriptGenerator()
         self.result_processor = ResultProcessor()
         

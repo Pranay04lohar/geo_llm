@@ -7,6 +7,7 @@ Uses template-based approach for different types of geospatial analysis.
 
 import os
 from typing import Dict, Any, List, Optional
+from .parameter_normalizer import normalize_llm_parameters
 
 
 class ScriptGenerator:
@@ -48,18 +49,24 @@ class ScriptGenerator:
         Returns:
             Dict containing the generated script and metadata
         """
-        # Get base template for the intent
-        template = self.base_templates.get(intent, self.base_templates["general_stats"])
+        # Normalize parameters for LLM compatibility
+        normalized_params = normalize_llm_parameters(parameters)
         
-        # Extract parameters
-        datasets = parameters.get("recommended_datasets", ["COPERNICUS/S2_SR"])
-        date_range = parameters.get("date_range", {})
-        analysis_params = parameters.get("parameters", {})
+        # Use normalized intent if provided, otherwise use the passed intent
+        final_intent = normalized_params.get("primary_intent", intent)
+        
+        # Get base template for the intent
+        template = self.base_templates.get(final_intent, self.base_templates["general_stats"])
+        
+        # Extract normalized parameters
+        datasets = normalized_params.get("recommended_datasets", ["COPERNICUS/S2_SR"])
+        date_range = normalized_params.get("date_range", {})
+        analysis_params = normalized_params.get("parameters", {})
         
         # Generate script by filling template
         script_code = self._fill_template(
             template=template,
-            intent=intent,
+            intent=final_intent,
             roi_geometry=roi_geometry,
             datasets=datasets,
             date_range=date_range,
@@ -67,14 +74,16 @@ class ScriptGenerator:
         )
         
         # Generate metadata
-        metadata = self._generate_metadata(intent, parameters, roi_geometry)
+        metadata = self._generate_metadata(final_intent, normalized_params, roi_geometry)
         
         return {
             "script_code": script_code,
             "metadata": metadata,
-            "intent": intent,
+            "intent": final_intent,
             "datasets_used": datasets,
-            "roi_geometry": roi_geometry
+            "roi_geometry": roi_geometry,
+            "original_parameters": parameters,  # Keep track of original
+            "normalized_parameters": normalized_params  # Show normalization
         }
         
     def _fill_template(
@@ -122,18 +131,59 @@ class ScriptGenerator:
         
     def _geojson_to_gee_geometry(self, geojson_geometry: Dict[str, Any]) -> str:
         """Convert GeoJSON geometry to GEE geometry code."""
-        geom_type = geojson_geometry.get("type", "Polygon")
+        geom_type = geojson_geometry.get("type", "")
         coordinates = geojson_geometry.get("coordinates", [])
         
-        if geom_type == "Polygon":
+        if geom_type == "Polygon" and coordinates and len(coordinates) > 0:
             # Convert polygon coordinates to GEE format
-            if coordinates:
-                coords_list = coordinates[0]  # First ring (exterior)
+            coords_list = coordinates[0]  # First ring (exterior)
+            if coords_list and len(coords_list) >= 3:  # Need at least 3 points
                 coord_pairs = ", ".join([f"[{lng}, {lat}]" for lng, lat in coords_list])
                 return f"ee.Geometry.Polygon([[{coord_pairs}]])"
         
-        # Fallback - create a simple rectangle
-        return "ee.Geometry.Rectangle([72.8, 19.0, 72.9, 19.1])"
+        elif geom_type == "Point" and coordinates and len(coordinates) >= 2:
+            # Convert point to small buffer around point
+            lng, lat = coordinates[0], coordinates[1]
+            buffer_size = 0.01  # ~1km buffer
+            return f"ee.Geometry.Rectangle([{lng-buffer_size}, {lat-buffer_size}, {lng+buffer_size}, {lat+buffer_size}])"
+        
+        elif geom_type == "LineString" and coordinates and len(coordinates) >= 2:
+            # Convert line to polygon by buffering
+            coord_pairs = ", ".join([f"[{lng}, {lat}]" for lng, lat in coordinates])
+            return f"ee.Geometry.LineString([{coord_pairs}]).buffer(1000)"  # 1km buffer
+        
+        # Enhanced fallback - try to extract any coordinate pair from the geometry
+        if isinstance(geojson_geometry, dict):
+            all_coords = self._extract_any_coordinates(geojson_geometry)
+            if all_coords:
+                lng, lat = all_coords[0], all_coords[1]
+                # Create a reasonable rectangle around the coordinate
+                buffer_size = 0.05  # ~5km buffer for better analysis area
+                return f"ee.Geometry.Rectangle([{lng-buffer_size}, {lat-buffer_size}, {lng+buffer_size}, {lat+buffer_size}])"
+        
+        # Ultimate fallback - global extent (avoid hardcoded Mumbai)
+        return "ee.Geometry.Rectangle([-180, -60, 180, 60])"  # Global extent excluding polar regions
+    
+    def _extract_any_coordinates(self, geom: Dict[str, Any]) -> List[float]:
+        """Extract any valid coordinate pair from a geometry object."""
+        def extract_coords_recursive(obj):
+            if isinstance(obj, list):
+                # Check if this is a coordinate pair [lng, lat]
+                if len(obj) == 2 and all(isinstance(x, (int, float)) for x in obj):
+                    return obj
+                # Recursively check nested lists
+                for item in obj:
+                    result = extract_coords_recursive(item)
+                    if result:
+                        return result
+            elif isinstance(obj, dict):
+                for value in obj.values():
+                    result = extract_coords_recursive(value)
+                    if result:
+                        return result
+            return None
+        
+        return extract_coords_recursive(geom)
         
     def _generate_metadata(
         self, 
@@ -156,8 +206,9 @@ class ScriptGenerator:
         """Estimate area of ROI in square kilometers (rough calculation)."""
         # Simple bounding box area estimation
         if roi_geometry.get("type") == "Polygon":
-            coords = roi_geometry.get("coordinates", [[]])[0]
-            if len(coords) >= 4:
+            coordinates = roi_geometry.get("coordinates", [])
+            if coordinates and len(coordinates) > 0 and len(coordinates[0]) >= 4:
+                coords = coordinates[0]
                 lngs = [coord[0] for coord in coords]
                 lats = [coord[1] for coord in coords]
                 

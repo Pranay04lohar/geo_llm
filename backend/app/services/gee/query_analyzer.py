@@ -23,17 +23,20 @@ class QueryAnalyzer:
         self.intent_patterns = {
             "ndvi": [
                 r'\bndvi\b', r'\bvegetation\s+index\b', r'\bvegetation\s+health\b',
-                r'\bgreen\s+cover\b', r'\bplant\s+health\b', r'\bvegetation\s+analysis\b'
+                r'\bgreen\s+cover\b', r'\bplant\s+health\b', r'\bvegetation\s+analysis\b',
+                r'\bhow\s+green\b', r'\bgreen\w*\b.*\bvegetation\b', r'\bvegetation.*green\b'
             ],
             "landcover": [
                 r'\bland\s+cover\b', r'\bland\s+use\b', r'\bclassification\b',
                 r'\burban\s+area\b', r'\bforest\s+cover\b', r'\bwater\s+bodies\b',
-                r'\bcrop\s+mapping\b', r'\bhabitat\s+mapping\b'
+                r'\bcrop\s+mapping\b', r'\bhabitat\s+mapping\b',
+                r'\btypes?\s+of\s+surfaces?\b', r'\bwhat.*surfaces?\b', r'\bsurface\s+types?\b'
             ],
             "change_detection": [
                 r'\bchange\s+detection\b', r'\btemporal\s+analysis\b', r'\bover\s+time\b',
                 r'\bdeforestation\b', r'\burban\s+growth\b', r'\bchanges?\s+between\b',
-                r'\bbefore\s+and\s+after\b', r'\bcompare.*years?\b'
+                r'\bbefore\s+and\s+after\b', r'\bcompare.*years?\b',
+                r'\bchanges?\s+in\b.*\byears?\b', r'\bchanges?\s+over\b', r'\bover.*\byears?\b'
             ],
             "water_analysis": [
                 r'\bwater\s+bodies\b', r'\bwater\s+quality\b', r'\bwater\s+index\b',
@@ -123,7 +126,7 @@ class QueryAnalyzer:
         
         # Detect primary intent
         detected_intents = self._detect_intents(query_lower)
-        primary_intent = detected_intents[0] if detected_intents else "general_stats"
+        primary_intent = self._select_primary_intent(detected_intents, query_lower)
         
         # Extract date ranges
         date_range = self._extract_date_range(query_lower)
@@ -159,6 +162,54 @@ class QueryAnalyzer:
                     break  # Found this intent, move to next
                     
         return detected
+        
+    def _select_primary_intent(self, detected_intents: List[str], query_lower: str) -> str:
+        """Select the most appropriate primary intent from detected intents."""
+        if not detected_intents:
+            return "general_stats"
+            
+        if len(detected_intents) == 1:
+            return detected_intents[0]
+            
+        # Priority rules for multiple detected intents
+        intent_priority = {
+            # Technical indices have high priority
+            "ndvi": 10,
+            "water_analysis": 9,  # Higher than landcover for water-specific queries
+            "change_detection": 8,
+            
+            # Specific analysis types
+            "forest_analysis": 7,
+            "agriculture": 7,
+            "urban_analysis": 7,
+            "climate_weather": 7,
+            
+            # Broad categories have lower priority
+            "landcover": 5,  # Often matched but may not be primary intent
+            "general_stats": 1
+        }
+        
+        # Additional context-based scoring
+        context_scores = {}
+        for intent in detected_intents:
+            base_score = intent_priority.get(intent, 5)
+            context_score = 0
+            
+            # Boost specific intents based on context
+            if intent == "water_analysis" and any(term in query_lower for term in ["ndwi", "mndwi", "water"]):
+                context_score += 3
+            elif intent == "ndvi" and any(term in query_lower for term in ["vegetation", "green", "plant"]):
+                context_score += 3
+            elif intent == "change_detection" and any(term in query_lower for term in ["change", "over time", "years", "temporal"]):
+                context_score += 3
+            elif intent == "forest_analysis" and any(term in query_lower for term in ["forest", "trees", "deforestation"]):
+                context_score += 2
+                
+            context_scores[intent] = base_score + context_score
+            
+        # Select intent with highest score
+        primary_intent = max(context_scores.keys(), key=lambda x: context_scores[x])
+        return primary_intent
         
     def _extract_date_range(self, query_lower: str) -> Dict[str, Any]:
         """Extract date range from query text."""

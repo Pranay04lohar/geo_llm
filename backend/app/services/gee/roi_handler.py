@@ -3,7 +3,7 @@ Region of Interest (ROI) Handler
 
 Extracts and validates ROI from various sources:
 - Extracted location entities from LLM
-- Direct coordinates from query text
+- Direct coordinates from query text (Geocoding)
 - User prompts for clarification
 - Default fallback locations
 """
@@ -231,9 +231,13 @@ class ROIHandler:
             return None
             
         try:
-            # Add "India" to improve geocoding accuracy for Indian locations
-            search_query = f"{location_name}, India"
-            location = self.geocoder.geocode(search_query, timeout=10)
+            # Try exact location name first (no country bias)
+            location = self.geocoder.geocode(location_name, timeout=10)
+            
+            # Only add "India" hint if first search fails and using free service
+            if not location and self.geocoder_type in ["nominatim", "mock"]:
+                search_query = f"{location_name}, India"
+                location = self.geocoder.geocode(search_query, timeout=10)
             
             if location:
                 return (location.latitude, location.longitude)
