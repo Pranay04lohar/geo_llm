@@ -1,36 +1,137 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# GeoLLM Frontend
 
-## Getting Started
+A modern, interactive geospatial LLM interface built with Next.js, React, and Three.js. Features a beautiful animated Earth background with a sophisticated chat interface for geospatial data analysis.
 
-First, run the development server:
+## 🌍 Features
 
+- **Animated 3D Earth**: Realistic Earth visualization with Three.js
+- **Interactive Chat Interface**: Modern chat UI with geospatial query capabilities
+- **Collapsible Sidebars**: Left sidebar for chat history, right sidebar for map tools
+- **Responsive Design**: Fully responsive layout that works on all devices
+- **Modern UI/UX**: Glassmorphism effects, smooth animations, and hover interactions
+- **Blue-Cyan Theme**: Consistent color scheme throughout the application
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js 18+ 
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <your-repo-url>
+cd geo_llm/frontend
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+3. Run the development server:
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Learn More
+## 🛠️ Tech Stack
 
-To learn more about Next.js, take a look at the following resources:
+- **Framework**: Next.js 15.4.5
+- **React**: 19.1.0
+- **3D Graphics**: Three.js with @react-three/fiber
+- **Styling**: Tailwind CSS 4
+- **Animations**: CSS transitions and Three.js animations
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📁 Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── page.js          # Main application page
+│   │   ├── layout.js        # Root layout component
+│   │   └── globals.css      # Global styles
+│   └── components/
+│       ├── AnimatedEarth.jsx    # 3D Earth component
+│       └── CollapsibleSidebar.jsx # Sidebar component
+├── public/
+│   └── textures/            # Earth texture files
+└── package.json
+```
 
-## Deploy on Vercel
+## 🎨 UI Components
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Navigation Bar
+- Centered "GeoLLM" title
+- "Get Plus" button on the left
+- Settings icon on the right
+- Transparent background with backdrop blur
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Left Sidebar (Chat)
+- Chat history with recent conversations
+- New chat button
+- Search functionality
+- User profile section
+- Notification indicators
+
+### Right Sidebar (Map Tools)
+- Drawing tools (Draw ROI, Select)
+- Navigation tools (Zoom In, Reset)
+- Map mode toggle (Satellite, Street)
+- Map container for visualizations
+
+### Main Chat Area
+- Welcome message with animated Earth background
+- Floating chat input with microphone and send buttons
+- Tools button for additional functionality
+
+## 🎯 Key Features
+
+- **Hover Effects**: All buttons have smooth scale and shadow hover effects
+- **Local Storage**: Sidebar collapse states are persisted
+- **Responsive**: Mobile-friendly design with proper breakpoints
+- **Accessibility**: Proper focus states and keyboard navigation
+- **Performance**: Optimized Three.js rendering with proper cleanup
+
+## 📦 Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run ESLint
+
+## 🌟 Design Highlights
+
+- **Color Scheme**: Blue-to-cyan gradient (`bg-gradient-to-r from-blue-600 to-cyan-600`)
+- **Glassmorphism**: Subtle transparency and backdrop blur effects
+- **Smooth Animations**: 200ms transitions for all interactive elements
+- **3D Earth**: Realistic Earth texture with proper lighting and rotation
+- **Star Field**: Animated background stars for immersive experience
+
+## 🔧 Configuration
+
+The project uses:
+- **Tailwind CSS** for styling with custom configuration
+- **ESLint** for code quality
+- **Next.js** for routing and optimization
+- **Three.js** for 3D graphics
+
+## 📄 License
+
+This project is part of the GeoLLM application suite.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run linting: `npm run lint`
+5. Submit a pull request
+
+---
+
+Built with ❤️ for geospatial data analysis
