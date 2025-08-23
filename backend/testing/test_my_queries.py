@@ -20,10 +20,8 @@ def test_custom_queries():
     
     # 🎯 MODIFY THESE QUERIES TO TEST DIFFERENT SCENARIOS
     my_queries = [
-        "Calculate NDVI for Assam",
         "Tell me about rainwater in udaipur in 2024",
         "What's the average temperature in jammu in 2023",
-        "LULC analysis for indore",
         # Add your own queries here!
     ]
     

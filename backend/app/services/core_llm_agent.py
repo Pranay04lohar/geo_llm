@@ -291,9 +291,13 @@ def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Too
         "Given a user query, respond ONLY with a compact JSON object of the form\n"
         "{\"intent\": \"GEE_Tool|RAG_Tool|WebSearch_Tool\"}.\n"
         "Rules:\n"
-        "- GEE_Tool: geospatial tasks (ROI, polygon, coordinates, lat/lng, map ops).\n"
-        "- RAG_Tool: factual/policy/definition or documents-based.\n"
-        "- WebSearch_Tool: external, live, or timely info (weather, latest, today, update, news).\n"
+        "- GEE_Tool: geospatial tasks (ROI, polygon, coordinates, lat/lng, map ops, satellite analysis).\n"
+        "- RAG_Tool: policy/law based/definition, documents-based, or historical climatology data.\n"
+        "- WebSearch_Tool: external, live, or timely info including:\n"
+        "  * Current weather, temperature, rainfall, climate data\n"
+        "  * Recent year queries (2023, 2024, 2025) for weather/climate\n"
+        "  * Live updates, news, today's information\n"
+        "  * Real-time environmental data\n"
         "No extra text."
     )
     payload = {
@@ -358,15 +362,20 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
     system_prompt = (
         "You are a tool planner for a geospatial assistant.\n"
         "You have 3 tools available:\n"
-        "1) GEE_Tool → for geospatial analysis (maps, ROI, satellite data)\n"
-        "2) RAG_Tool → for factual/knowledge-based queries (laws, government reports, static datasets)\n"
-        "3) Search_Tool → for external information not in our internal KB (news, latest updates)\n\n"
+        "1) GEE_Tool → for geospatial analysis (maps, ROI, satellite data, land cover, vegetation)\n"
+        "2) RAG_Tool → for factual/knowledge-based queries (laws, government reports, static datasets, historical climatology)\n"
+        "3) Search_Tool → for external information including:\n"
+        "   - Current weather, temperature, rainfall, climate data\n"
+        "   - Recent year queries (2023, 2024, 2025) for weather/climate\n"
+        "   - Live updates, news, today's information\n"
+        "   - Real-time environmental data\n\n"
         "Given a user query, output a JSON with keys: 'subtasks' (list of {step, task}), 'tools_to_use' (list of tool names), 'reasoning' (short string).\n"
         "Output rules:\n"
         "- JSON ONLY. No markdown, no code fences.\n"
         "- tools_to_use may include one or more of: GEE_Tool, RAG_Tool, Search_Tool.\n"
         "- Steps should be in execution order starting from 1.\n"
-        "- Keep 'reasoning' concise (<= 25 words)."
+        "- Keep 'reasoning' concise (<= 25 words).\n"
+        "- Weather/climate queries with recent years should use Search_Tool."
     )
 
     payload = {
