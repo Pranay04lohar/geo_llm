@@ -73,10 +73,12 @@ class HybridQueryAnalyzer:
             },
             "soil_analysis": {
                 "keywords": ["soil", "fertility", "erosion", "ph", "organic", "clay", "sand", 
-                           "nutrients", "agriculture", "farming", "cultivation"],
+                           "nutrients", "agriculture", "farming", "cultivation", "types", "most common"],
                 "patterns": [r"\bsoil\s+proper", r"\bsoil\s+health", r"\bsoil\s+qualit", 
-                           r"\bfertility", r"\berosion", r"\bsoil\s+ph"],
-                "confidence_boost": 0.2
+                           r"\bfertility", r"\berosion", r"\bsoil\s+ph", r"\btypes?\s+of\s+soil",
+                           r"\bmost\s+common", r"\bsoil\s+types?", r"\bclay\s+content",
+                           r"\bsand\s+content", r"\borganic\s+carbon"],
+                "confidence_boost": 0.4  # Increased confidence boost for soil queries
             },
             "transportation_network": {
                 "keywords": ["road", "highway", "transport", "traffic", "infrastructure", "connectivity", 

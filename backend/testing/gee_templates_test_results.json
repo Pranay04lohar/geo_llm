@@ -1,0 +1,643 @@
+{
+  "climate_analysis": {
+    "template_name": "climate_analysis",
+    "success": true,
+    "execution_time": 58.668487310409546,
+    "template_used": true,
+    "datasets_used": [
+      "NASA/GLDAS/V021/NOAH/G025/T3H"
+    ],
+    "statistics_count": 6,
+    "analysis_length": 372,
+    "roi_generated": true,
+    "evidence": [
+      "test:climate_analysis_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_climate_analysis",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:climate_analysis_analysis"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Mumbai\n==================================================\n📍 Region: Mumbai\n📐 Area: 0.00 km²\n🎯 Analysis Type: Climate Analysis\n\n🌤️ Climate and Environmental Analysis:\n\n🛰️ Data Sources:\n   • GLDAS Hydrological Data\n\n🔧 Technical Details:\n   • Dataset: NASA/GLDAS/V021/NOAH/G025/T3H\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:51",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Mumbai",
+          "source_locations": [
+            "Mumbai"
+          ],
+          "analysis_type": "climate_analysis",
+          "statistics": {
+            "roi_area_km2": 4029.9550692414027,
+            "temperature_celsius": 0,
+            "precipitation_mm": 0,
+            "soil_moisture": 0,
+            "evapotranspiration": 0,
+            "humidity": 0
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "NASA/GLDAS/V021/NOAH/G025/T3H"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:51:29.050864"
+          },
+          "confidence": 0.9500000000000001
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                72.1932795376664,
+                18.823058264864862
+              ],
+              [
+                73.4708662623336,
+                18.823058264864862
+              ],
+              [
+                73.4708662623336,
+                19.093328535135136
+              ],
+              [
+                72.1932795376664,
+                19.093328535135136
+              ],
+              [
+                72.1932795376664,
+                18.823058264864862
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:climate_analysis_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_climate_analysis",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:climate_analysis_analysis"
+      ]
+    }
+  },
+  "population_density": {
+    "template_name": "population_density",
+    "success": true,
+    "execution_time": 6.545130729675293,
+    "template_used": true,
+    "datasets_used": [
+      "WorldPop/GP/100m/pop"
+    ],
+    "statistics_count": 4,
+    "analysis_length": 297,
+    "roi_generated": true,
+    "evidence": [
+      "test:population_density_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_population_density",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:population_density_analysis"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Delhi\n==================================================\n📍 Region: Delhi\n📐 Area: 0.00 km²\n🎯 Analysis Type: Population Density\n\n📊 General Analysis:\n\n🔧 Technical Details:\n   • Dataset: WorldPop/GP/100m/pop\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:51",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Delhi",
+          "source_locations": [
+            "Delhi"
+          ],
+          "analysis_type": "population_density",
+          "statistics": {
+            "roi_area_km2": 2476.241274673772,
+            "total_population": 0,
+            "urban_area_km2": 0,
+            "population_density_mean": 0
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "WorldPop/GP/100m/pop"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:51:36.598365"
+          },
+          "confidence": 0.9500000000000001
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                76.67997490066843,
+                28.568924064864863
+              ],
+              [
+                77.52500549933156,
+                28.568924064864863
+              ],
+              [
+                77.52500549933156,
+                28.839194335135137
+              ],
+              [
+                76.67997490066843,
+                28.839194335135137
+              ],
+              [
+                76.67997490066843,
+                28.568924064864863
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:population_density_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_population_density",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:population_density_analysis"
+      ]
+    }
+  },
+  "forest_cover": {
+    "template_name": "forest_cover",
+    "success": true,
+    "execution_time": 8.22793960571289,
+    "template_used": true,
+    "datasets_used": [
+      "UMD/hansen/global_forest_change_2022_v1_10",
+      "COPERNICUS/S2_SR_HARMONIZED"
+    ],
+    "statistics_count": 6,
+    "analysis_length": 321,
+    "roi_generated": true,
+    "evidence": [
+      "test:forest_cover_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_forest_cover",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:forest_cover_analysis",
+      "gee_tool:ndvi_calculated"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Rajasthan\n==================================================\n📍 Region: Rajasthan\n📐 Area: 0.00 km²\n🎯 Analysis Type: Forest Cover\n\n📊 General Analysis:\n\n🔧 Technical Details:\n   • Dataset: UMD/hansen/global_forest_change_2022_v1_10\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:51",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Rajasthan",
+          "source_locations": [
+            "Rajasthan"
+          ],
+          "analysis_type": "forest_cover",
+          "statistics": {
+            "roi_area_km2": 29634.469184510654,
+            "forest_area_km2": 0.07189251300048828,
+            "forest_loss_area_km2": 0.07668008135986328,
+            "forest_gain_area_km2": 0.0,
+            "high_vegetation_area_km2": 203.48600308359423,
+            "tree_cover_mean": 0.00021414563355989726
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "UMD/hansen/global_forest_change_2022_v1_10",
+              "COPERNICUS/S2_SR_HARMONIZED"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:51:45.829424"
+          },
+          "confidence": 0.99
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                72.72224128762053,
+                26.57335314954955
+              ],
+              [
+                75.71362391237949,
+                26.57335314954955
+              ],
+              [
+                75.71362391237949,
+                27.47425405045045
+              ],
+              [
+                72.72224128762053,
+                27.47425405045045
+              ],
+              [
+                72.72224128762053,
+                26.57335314954955
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:forest_cover_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_forest_cover",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:forest_cover_analysis",
+        "gee_tool:ndvi_calculated"
+      ]
+    }
+  },
+  "transportation_network": {
+    "template_name": "transportation_network",
+    "success": true,
+    "execution_time": 8.079904556274414,
+    "template_used": true,
+    "datasets_used": [
+      "COPERNICUS/S2_SR_HARMONIZED"
+    ],
+    "statistics_count": 3,
+    "analysis_length": 316,
+    "roi_generated": true,
+    "evidence": [
+      "test:transportation_network_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_transportation_network",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:transportation_network_analysis"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Bangalore\n==================================================\n📍 Region: Bangalore\n📐 Area: 0.00 km²\n🎯 Analysis Type: Transportation Network\n\n📊 General Analysis:\n\n🔧 Technical Details:\n   • Dataset: COPERNICUS/S2_SR_HARMONIZED\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:51",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Bangalore",
+          "source_locations": [
+            "Bangalore"
+          ],
+          "analysis_type": "transportation_network",
+          "statistics": {
+            "roi_area_km2": 6050.177605465368,
+            "built_up_area_km2": 1536.3741682195825,
+            "ndbi_mean": 0.02824457752544332
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "COPERNICUS/S2_SR_HARMONIZED"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:51:54.912453"
+          },
+          "confidence": 0.9500000000000001
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                76.64511014500593,
+                12.827731764864865
+              ],
+              [
+                78.50990785499405,
+                12.827731764864865
+              ],
+              [
+                78.50990785499405,
+                13.098002035135135
+              ],
+              [
+                76.64511014500593,
+                13.098002035135135
+              ],
+              [
+                76.64511014500593,
+                12.827731764864865
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:transportation_network_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_transportation_network",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:transportation_network_analysis"
+      ]
+    }
+  },
+  "lulc_analysis": {
+    "template_name": "lulc_analysis",
+    "success": true,
+    "execution_time": 3.7407493591308594,
+    "template_used": true,
+    "datasets_used": [],
+    "statistics_count": 7,
+    "analysis_length": 283,
+    "roi_generated": true,
+    "evidence": [
+      "test:lulc_analysis_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_lulc_analysis",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:lulc_analysis_analysis"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Chennai\n==================================================\n📍 Region: Chennai\n📐 Area: 0.00 km²\n🎯 Analysis Type: Lulc Analysis\n\n📊 General Analysis:\n\n🔧 Technical Details:\n   • Dataset: Unknown\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:51",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Chennai",
+          "source_locations": [
+            "Chennai"
+          ],
+          "analysis_type": "lulc_analysis",
+          "statistics": {
+            "roi_area_km2": 5997.992467374084,
+            "built_up_area_km2": 0,
+            "cropland_area_km2": 0,
+            "forest_area_km2": 0,
+            "grassland_area_km2": 0,
+            "water_area_km2": 0,
+            "bare_soil_area_km2": 0
+          },
+          "processing_metadata": {
+            "datasets_used": [],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:51:59.657130"
+          },
+          "confidence": 0.9500000000000001
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                79.3466635313097,
+                12.949165564864865
+              ],
+              [
+                81.1942608686903,
+                12.949165564864865
+              ],
+              [
+                81.1942608686903,
+                13.219435835135135
+              ],
+              [
+                79.3466635313097,
+                13.219435835135135
+              ],
+              [
+                79.3466635313097,
+                12.949165564864865
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:lulc_analysis_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_lulc_analysis",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:lulc_analysis_analysis"
+      ]
+    }
+  },
+  "soil_analysis": {
+    "template_name": "soil_analysis",
+    "success": true,
+    "execution_time": 14.194686651229858,
+    "template_used": true,
+    "datasets_used": [
+      "NASA/GLDAS/V021/NOAH/G025/T3H"
+    ],
+    "statistics_count": 6,
+    "analysis_length": 303,
+    "roi_generated": true,
+    "evidence": [
+      "test:soil_analysis_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_soil_analysis",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:soil_analysis_analysis"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Punjab\n==================================================\n📍 Region: Punjab\n📐 Area: 0.00 km²\n🎯 Analysis Type: Soil Analysis\n\n📊 General Analysis:\n\n🔧 Technical Details:\n   • Dataset: NASA/GLDAS/V021/NOAH/G025/T3H\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:52",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Punjab",
+          "source_locations": [
+            "Punjab"
+          ],
+          "analysis_type": "soil_analysis",
+          "statistics": {
+            "roi_area_km2": 24730.044378138602,
+            "soil_ph_mean": 0,
+            "organic_carbon_mean": 0,
+            "clay_content_mean": 0,
+            "sand_content_mean": 0,
+            "silt_content_mean": 0
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "NASA/GLDAS/V021/NOAH/G025/T3H"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:52:14.855335"
+          },
+          "confidence": 0.9500000000000001
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                74.04301545778581,
+                30.69668004954955
+              ],
+              [
+                76.63942034221417,
+                30.69668004954955
+              ],
+              [
+                76.63942034221417,
+                31.59758095045045
+              ],
+              [
+                74.04301545778581,
+                31.59758095045045
+              ],
+              [
+                74.04301545778581,
+                30.69668004954955
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:soil_analysis_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_soil_analysis",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:soil_analysis_analysis"
+      ]
+    }
+  },
+  "water_analysis": {
+    "template_name": "water_analysis",
+    "success": true,
+    "execution_time": 203.65240478515625,
+    "template_used": true,
+    "datasets_used": [
+      "JRC/GSW1_4/MonthlyHistory",
+      "COPERNICUS/S2_SR_HARMONIZED"
+    ],
+    "statistics_count": 7,
+    "analysis_length": 1025,
+    "roi_generated": true,
+    "evidence": [
+      "test:water_analysis_template",
+      "gee_tool:query_analyzed",
+      "gee_tool:roi_extracted_llm_locations",
+      "gee_tool:using_template_water_analysis",
+      "gee_tool:template_execution_success",
+      "gee_tool:script_generated",
+      "gee_tool:script_executed",
+      "gee_tool:results_obtained",
+      "gee_tool:water_analysis_analysis",
+      "gee_tool:water_detected"
+    ],
+    "full_result": {
+      "analysis": "Geospatial Analysis Results for Kerala\n==================================================\n📍 Region: Kerala\n📐 Area: 0.00 km²\n🎯 Analysis Type: Water Analysis\n\n💧 Water Body Analysis:\n   • Total Water Area: 38314.284 km²\n   • Water Coverage: 44.27% of ROI\n   • ROI Total Area: 86551.62 km²\n   • Coverage Status: High water coverage (major water bodies present)\n\n   📊 NDWI (Normalized Difference Water Index):\n      • Mean: -0.101\n      • Range: -0.900 to 1.000\n      • Standard Deviation: 0.000\n      • Signal Strength: No water signal detected\n\n   🛰️ Data Sources:\n      • JRC/GSW1_4/MonthlyHistory\n      • COPERNICUS/S2_SR_HARMONIZED\n\n   🔬 Detection Methods:\n      • JRC Global Surface Water\n      • NDWI (Green-NIR)\n      • Modified NDWI (Green-SWIR)\n\n   📊 Pixel Analysis:\n      • Total ROI Pixels: 86,551,620,750.17245\n      • Water Pixels: 38,314,284,375.930595\n      • Water Pixel Percentage: 44.27%\n\n🔧 Technical Details:\n   • Dataset: JRC/GSW1_4/MonthlyHistory\n   • Processing Time: 0s\n   • Analysis Date: 2025-08-25 22:55",
+      "roi": {
+        "type": "Feature",
+        "properties": {
+          "name": "GEE Analysis - Kerala",
+          "source_locations": [
+            "Kerala"
+          ],
+          "analysis_type": "water_analysis",
+          "statistics": {
+            "water_area_km2": 38314.2843759306,
+            "water_percentage": 44.267552755046765,
+            "roi_area_km2": 86551.62075017246,
+            "mean_ndwi": -0.10117025643527106,
+            "mean_mndwi": 0,
+            "image_count": 498,
+            "pixel_count": {
+              "total_roi": 86551620750.17245,
+              "water_pixels": 38314284375.930595
+            }
+          },
+          "processing_metadata": {
+            "datasets_used": [
+              "JRC/GSW1_4/MonthlyHistory",
+              "COPERNICUS/S2_SR_HARMONIZED"
+            ],
+            "processing_time_s": 0,
+            "roi_area_km2": 0,
+            "analysis_timestamp": "2025-08-25T22:55:39.511192"
+          },
+          "confidence": 0.99
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                72.6838702071458,
+                9.71270214954955
+              ],
+              [
+                80.59867219285418,
+                9.71270214954955
+              ],
+              [
+                80.59867219285418,
+                10.61360305045045
+              ],
+              [
+                72.6838702071458,
+                10.61360305045045
+              ],
+              [
+                72.6838702071458,
+                9.71270214954955
+              ]
+            ]
+          ]
+        }
+      },
+      "evidence": [
+        "test:water_analysis_template",
+        "gee_tool:query_analyzed",
+        "gee_tool:roi_extracted_llm_locations",
+        "gee_tool:using_template_water_analysis",
+        "gee_tool:template_execution_success",
+        "gee_tool:script_generated",
+        "gee_tool:script_executed",
+        "gee_tool:results_obtained",
+        "gee_tool:water_analysis_analysis",
+        "gee_tool:water_detected"
+      ]
+    }
+  }
+}

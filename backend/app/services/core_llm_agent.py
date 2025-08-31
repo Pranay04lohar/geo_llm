@@ -3,7 +3,7 @@ Core LLM Agent (MVP) using a simple LangGraph-style pipeline.
 
 This module defines a controller agent graph that orchestrates geospatial queries:
 - Accepts a user query string as input state.
-- Extracts location entities using LLM-based NER (DeepSeek R1 via OpenRouter).
+- Extracts location entities using LLM-based NER (meta-llama/llama-3.3-8b-instruct via OpenRouter).
 - Calls an LLM planner via OpenRouter to break queries into ordered subtasks 
   and assign tools (GEE_Tool, RAG_Tool, Search_Tool).
 - Executes each subtask by dispatching to tool nodes and aggregates
@@ -48,10 +48,12 @@ Tool Status:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, TypedDict
 import os
 import json
 import sys
+from typing import Any, Dict, List, Literal, Optional, TypedDict
+from pathlib import Path
+import time # Added for retry mechanism
 
 # Attempt to import LangGraph; fall back to a minimal local stub if unavailable or broken
 # The stub implements only the subset of the API used in this MVP (add_node, add_edge,
@@ -129,6 +131,58 @@ except Exception:  # pragma: no cover
 import requests
 from dotenv import load_dotenv
 
+# --- Robust .env file loading ---
+# The .env file is located in the `backend` directory.
+# This script is in `backend/app/services`, so we navigate up three levels to find it.
+backend_dir = Path(__file__).parent.parent.parent
+dotenv_path = backend_dir / ".env"
+
+if dotenv_path.exists():
+    load_dotenv(dotenv_path=dotenv_path)
+    # This print statement is commented out to avoid clutter in production logs
+    # print(f"✅ Loaded .env file from: {dotenv_path}")
+else:
+    # As a final fallback, try loading from the current working directory
+    load_dotenv()
+    if not os.getenv("OPENROUTER_API_KEY"):
+        print(f"⚠️ Warning: .env file not found at {dotenv_path}. LLM calls may fail.")
+
+# Now, import the rest of the modules
+from .gee.gee_client import GEEClient
+from .gee.roi_handler import ROIHandler
+from .gee.hybrid_query_analyzer import HybridQueryAnalyzer
+from .gee.template_loader import TemplateLoader
+from .gee.result_processor import ResultProcessor
+
+
+# --- State Definition ---
+class AgentState(TypedDict, total=False):
+    """Shared state passed between nodes in the LangGraph.
+
+    The state evolves as nodes run. Keys are optional to keep the graph flexible.
+    """
+
+    # Input
+    query: str
+
+    # Controller output (kept for compatibility, not required by planner flow)
+    intent: Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]
+
+    # Intermediate parsed data
+    locations: List[Dict[str, Any]]
+
+    # LLM Planning outputs
+    plan: Dict[str, Any]
+    subtasks_results: List[Dict[str, Any]]
+
+    # Tool outputs (aggregated)
+    analysis: str
+    roi: Optional[Dict[str, Any]]
+
+    # Optional evidence/logs for debugging or later UI use
+    evidence: List[str]
+
+
 def llm_extract_locations_openrouter(user_query: str) -> List[Dict[str, Any]]:
     """Extract location entities using DeepSeek R1 via OpenRouter.
     
@@ -136,17 +190,9 @@ def llm_extract_locations_openrouter(user_query: str) -> List[Dict[str, Any]]:
     Falls back to empty list on error.
     """
     
-    # Load .env
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        dotenv_path = os.path.join(backend_root, ".env")
-        load_dotenv(dotenv_path, override=False)
-    except Exception:
-        pass
-
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
+        print("Error: OPENROUTER_API_KEY is not set. Location extraction will fail.", file=sys.stderr)
         return []
 
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -220,36 +266,9 @@ def llm_extract_locations_openrouter(user_query: str) -> List[Dict[str, Any]]:
 
 # Default models (override via env):
 # OPENROUTER_INTENT_MODEL, OPENROUTER_PLANNER_MODEL
-# These can be set to any OpenRouter model slug. Defaults target DeepSeek R1 free.
-MODEL_INTENT = os.environ.get("OPENROUTER_INTENT_MODEL", "deepseek/deepseek-r1:free")
+# These can be set to any OpenRouter model slug. Defaults target Google Gemma 2 9B.
+MODEL_INTENT = os.environ.get("OPENROUTER_INTENT_MODEL", "mistralai/mistral-7b-instruct:free")
 MODEL_PLANNER = os.environ.get("OPENROUTER_PLANNER_MODEL", MODEL_INTENT)
-
-
-class AgentState(TypedDict, total=False):
-    """Shared state passed between nodes in the LangGraph.
-
-    The state evolves as nodes run. Keys are optional to keep the graph flexible.
-    """
-
-    # Input
-    query: str
-
-    # Controller output (kept for compatibility, not required by planner flow)
-    intent: Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]
-
-    # Intermediate parsed data
-    locations: List[Dict[str, Any]]
-
-    # LLM Planning outputs
-    plan: Dict[str, Any]
-    subtasks_results: List[Dict[str, Any]]
-
-    # Tool outputs (aggregated)
-    analysis: str
-    roi: Optional[Dict[str, Any]]
-
-    # Optional evidence/logs for debugging or later UI use
-    evidence: List[str]
 
 
 def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Tool", "WebSearch_Tool"]:
@@ -258,19 +277,9 @@ def llm_parse_intent_openrouter(user_query: str) -> Literal["GEE_Tool", "RAG_Too
     Expects OPENROUTER_API_KEY in environment. Returns one of the 3 tool names.
     """
 
-    # Load .env from backend repo root when running as a script
-    try:
-        # Attempt to load ../../.env relative to this file (backend/.env)
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        dotenv_path = os.path.join(backend_root, ".env")
-        load_dotenv(dotenv_path, override=False)
-    except Exception:
-        pass
-
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY missing – intent classification requires OpenRouter.")
+        raise RuntimeError("OPENROUTER_API_KEY is missing – intent classification requires OpenRouter.")
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -328,17 +337,9 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
     Returns parsed dict on success, or None on error/invalid.
     """
 
-    # Attempt to load .env as earlier
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        dotenv_path = os.path.join(backend_root, ".env")
-        load_dotenv(dotenv_path, override=False)
-    except Exception:
-        pass
-
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
+        print("Error: OPENROUTER_API_KEY is not set. Planner will fail.", file=sys.stderr)
         return None
 
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -358,6 +359,8 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
         "Given a user query, output a JSON with keys: 'subtasks' (list of {step, task}), 'tools_to_use' (list of tool names), 'reasoning' (short string).\n"
         "Output rules:\n"
         "- JSON ONLY. No markdown, no code fences.\n"
+        "- For geospatial queries, use ONLY ONE GEE_Tool call that does complete analysis.\n"
+        "- Avoid multiple subtasks that do the same analysis.\n"
         "- tools_to_use may include one or more of: GEE_Tool, RAG_Tool, Search_Tool.\n"
         "- Steps should be in execution order starting from 1.\n"
         "- Keep 'reasoning' concise (<= 25 words)."
@@ -370,34 +373,94 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
             {"role": "user", "content": user_query},
         ],
         "temperature": 0.2,
-        "response_format": {"type": "json_object"},
+        "response_format": {"type": "json_object"}, 
     }
+    
+        # --- Retry Logic ---
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f"🔧 Planner attempt {attempt + 1}/{max_retries} with model: {MODEL_PLANNER}", file=sys.stderr)
+            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+            print(f"🔧 Planner HTTP status: {resp.status_code}", file=sys.stderr)
+            resp.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+            
+            response_data = resp.json()
+            print(f"🔧 Planner raw response keys: {list(response_data.keys())}", file=sys.stderr)
+            
+            content = (
+                response_data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            
+            print(f"🔧 Planner content length: {len(content) if content else 0}", file=sys.stderr)
+            if content:
+                print(f"🔧 Planner content preview: {content[:200]}...", file=sys.stderr)
+            
+            if not content:
+                print("❌ Planner Error: LLM returned empty content.", file=sys.stderr)
+                if attempt < max_retries - 1:
+                    print(f"⚠️ Retrying without response_format...", file=sys.stderr)
+                    # Try without JSON format requirement
+                    payload_retry = payload.copy()
+                    payload_retry.pop("response_format", None)
+                    resp_retry = requests.post(url, headers=headers, data=json.dumps(payload_retry), timeout=30)
+                    if resp_retry.status_code == 200:
+                        content_retry = resp_retry.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                        if content_retry:
+                            print(f"🔧 Retry without JSON format worked: {content_retry[:100]}...", file=sys.stderr)
+                            content = content_retry
+                if not content:
+                    continue
+                    
+            parsed = json.loads(content)
+            
+            if (
+                isinstance(parsed, dict)
+                and "subtasks" in parsed
+                and "tools_to_use" in parsed
+                and "reasoning" in parsed
+            ):
+                print(f"✅ Planner success on attempt {attempt + 1}", file=sys.stderr)
+                return parsed
+            else:
+                print(f"❌ Planner Error: LLM response failed validation. Response: {parsed}", file=sys.stderr)
+                if attempt < max_retries - 1:
+                    continue
+                return None
 
-    try:
-        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
-        if not content:
+        except requests.exceptions.HTTPError as e:
+            # Retry on server errors (5xx), but not on client errors (4xx)
+            if e.response.status_code >= 500 and attempt < max_retries - 1:
+                print(f"⚠️ Planner HTTP Error ({e.response.status_code}): Retrying in {2 ** attempt}s...", file=sys.stderr)
+                time.sleep(2 ** attempt) # Exponential backoff
+                continue
+            else:
+                print(f"❌ Planner HTTP Error: {e}", file=sys.stderr)
+                print(f"❌ Response text: {e.response.text if hasattr(e, 'response') else 'N/A'}", file=sys.stderr)
+                return None # Fail on client errors or final retry
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Planner Request Error: {e}", file=sys.stderr)
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
             return None
-        parsed = json.loads(content)
-        # Validate structure minimally
-        if (
-            isinstance(parsed, dict)
-            and "subtasks" in parsed
-            and "tools_to_use" in parsed
-            and "reasoning" in parsed
-        ):
-            return parsed  # type: ignore[return-value]
-        return None
-    except Exception:
-        # Signal to caller; no auto-fallback from here
-        return None
+        except json.JSONDecodeError as e:
+            print(f"❌ Planner JSON Decode Error: Failed to parse LLM response. Details: {e}", file=sys.stderr)
+            print(f"❌ Raw content that failed to parse: {content}", file=sys.stderr)
+            if attempt < max_retries - 1:
+                continue
+            return None
+        except Exception as e:
+            print(f"❌ An unexpected error occurred in the planner: {e}", file=sys.stderr)
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return None
+            
+    return None # Should not be reached if max_retries > 0
 
 
 def controller_node(state: AgentState) -> Dict[str, Any]:
@@ -544,50 +607,259 @@ def roi_parser_node(state: AgentState) -> Dict[str, Any]:
 
 
 def gee_tool_node(state: AgentState) -> Dict[str, Any]:
-    """Mocked GEE tool invocation that now consumes parsed locations.
-
-    Replace this with a real geospatial pipeline (e.g., Earth Engine). For the
-    MVP we fabricate a square ROI. If locations were parsed by the previous
-    node, we simply reference them in the analysis for demonstration.
+    """Optimized GEE tool that calls the FastAPI gee_service for LULC analysis.
+    
+    Flow:
+    1. Extract locations from LLM NER or fallback to ROI parser
+    2. Create geometry from location coordinates  
+    3. Call FastAPI gee_service endpoint for optimized processing
+    4. Return formatted analysis and ROI
     """
-
-    # Default example center near Mumbai (lng, lat)
-    center_lng, center_lat = 72.8777, 19.0760
-
-    # Build a small square polygon (~0.01° offsets for demo only)
-    d = 0.01
-    ring = [
-        [center_lng - d, center_lat - d],
-        [center_lng + d, center_lat - d],
-        [center_lng + d, center_lat + d],
-        [center_lng - d, center_lat + d],
-        [center_lng - d, center_lat - d],
-    ]
-
-    roi: Dict[str, Any] = {
-        "type": "Feature",
-        "properties": {
-            "name": "Mock ROI (square)",
-            "source_locations": [loc.get("matched_name") for loc in state.get("locations", [])],
-        },
-        "geometry": {"type": "Polygon", "coordinates": [ring]},
-    }
-
-    if state.get("locations"):
-        analysis_prefix = (
-            "Parsed location entities – generating a mock ROI around the first location. "
+    
+    try:
+        user_query = state.get("query", "")
+        locations = state.get("locations", [])
+        
+        # Initialize ROI handler for geocoding if needed
+        from app.services.gee.roi_handler import ROIHandler
+        roi_handler = ROIHandler()
+        
+        # Step 1: Get ROI geometry from locations or fallback
+        roi_geometry = None
+        roi_source = "unknown"
+        
+        if locations:
+            # Use the first detected location for geocoding
+            primary_location = locations[0]
+            location_name = primary_location.get("matched_name", "")
+            location_type = primary_location.get("type", "city")
+            
+            print(f"🌍 Creating ROI for location: {location_name} ({location_type})")
+            
+            # Create ROI around the detected location
+            roi_info = roi_handler._create_roi_from_location(location_name, location_type)
+            if roi_info:
+                roi_geometry = roi_info.get("geometry")
+                roi_source = f"llm_ner_{location_name}"
+        
+        if not roi_geometry:
+            # Fallback: extract ROI from query text
+            print("🔍 Falling back to ROI extraction from query text")
+            roi_info = roi_handler.extract_roi_from_query(user_query)
+            if roi_info:
+                roi_geometry = roi_info.get("geometry")
+                roi_source = "query_parsing"
+        
+        if not roi_geometry:
+            # Ultimate fallback: use default ROI (Mumbai area)
+            print("📍 Using default ROI (Mumbai)")
+            roi_info = roi_handler.get_default_roi()
+            roi_geometry = roi_info.get("geometry")
+            roi_source = "default_mumbai"
+        
+        # Step 2: Check if this is an LULC-related query
+        query_lower = user_query.lower()
+        is_lulc_query = any(keyword in query_lower for keyword in [
+            "land", "cover", "urban", "vegetation", "built", "crop", "forest", 
+            "lulc", "land use", "land cover", "classification", "satellite"
+        ])
+        
+        if not is_lulc_query:
+            # For now, default to LULC analysis for all queries
+            print("ℹ️ Query not explicitly LULC-related, defaulting to LULC analysis")
+        
+        # Step 3: Call the optimized FastAPI gee_service
+        print(f"🚀 Calling optimized GEE service for LULC analysis")
+        print(f"📐 ROI source: {roi_source}")
+        
+        import requests
+        
+        # Prepare request for FastAPI gee_service
+        service_url = "http://localhost:8000/lulc/dynamic-world"
+        # Determine analysis parameters based on ROI buffer size
+        buffer_km = roi_info.get("buffer_km", 10) if roi_info else 10
+        if buffer_km:
+            # Adjust scale based on buffer size - larger scale for larger areas
+            scale = min(50, max(10, int(buffer_km * 3)))
+        else:
+            scale = 30
+        
+        payload = {
+            "geometry": roi_geometry,
+            "startDate": "2023-01-01", 
+            "endDate": "2023-12-31",
+            "confidenceThreshold": 0.5,
+            "scale": scale,
+            "maxPixels": 1e9,
+            "exactComputation": False,
+            "includeMedianVis": False  # Can be enabled for advanced visualization
+        }
+        
+        # Call the optimized service
+        response = requests.post(service_url, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        service_result = response.json()
+        
+        # Step 4: Format results for the agent contract using enhanced metadata
+        processing_time = service_result.get("processing_time_seconds", 0)
+        roi_area = service_result.get("roi_area_km2", 0)
+        map_stats = service_result.get("mapStats", {})
+        class_percentages = map_stats.get("class_percentages", {})
+        dominant_class = map_stats.get("dominant_class", "Unknown")
+        num_classes = map_stats.get("num_classes_detected", 0)
+        
+        # Enhanced URLs and metadata
+        visualization = service_result.get("visualization", {})
+        mode_tile_url = visualization.get("mode_tile_url", "")
+        median_tile_url = visualization.get("median_tile_url")
+        
+        metadata = service_result.get("metadata", {})
+        debug_info = service_result.get("debug", {})
+        
+        # Extract enriched metadata
+        confidence_used = metadata.get("confidence_threshold_used", 0.5)
+        collection_size = metadata.get("collection_size", 0)
+        confident_images = metadata.get("confident_images_used", 0)
+        histogram_method = debug_info.get("histogram_method", "unknown")
+        avg_confidence = metadata.get("average_confidence")
+        date_range = metadata.get("actual_date_range", {})
+        
+        # Generate comprehensive analysis text
+        if class_percentages:
+            # Create percentage summary
+            top_classes = sorted(class_percentages.items(), key=lambda x: x[1], reverse=True)[:5]
+            percentage_text = "\n".join([f"   • {cls}: {pct}%" for cls, pct in top_classes])
+            
+            analysis = (
+                f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
+                f"{'=' * 60}\n"
+                f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
+                f"📊 Area analyzed: {roi_area:.2f} km²\n"
+                f"⏱️ Processing time: {processing_time:.1f}s ({histogram_method} method)\n"
+                f"🏆 Dominant land cover: {dominant_class}\n"
+                f"📈 Classes detected: {num_classes}/9 Dynamic World classes\n\n"
+                f"📋 Land Cover Distribution:\n{percentage_text}\n\n"
+                f"🛰️ Data Quality:\n"
+                f"   • Satellite images used: {confident_images}/{collection_size}\n"
+                f"   • Confidence threshold: {confidence_used}\n"
+                f"   • Date range: {date_range.get('min_date', 'N/A')} to {date_range.get('max_date', 'N/A')}\n"
+            )
+            
+            if avg_confidence:
+                analysis += f"   • Average confidence: {avg_confidence:.1%}\n"
+                
+            analysis += f"\n🗺️ Interactive Visualization:\n"
+            analysis += f"   • Mode tile URL: {'✅ Available' if mode_tile_url else '❌ Failed'}\n"
+            
+            if median_tile_url:
+                analysis += f"   • Median tile URL: ✅ Available\n"
+                
+            if mode_tile_url:
+                analysis += f"\n🔗 Map Tile URL: {mode_tile_url[:100]}{'...' if len(mode_tile_url) > 100 else ''}"
+        else:
+            analysis = (
+                f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
+                f"{'=' * 60}\n"
+                f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
+                f"📊 Area analyzed: {roi_area:.2f} km²\n"
+                f"⏱️ Processing time: {processing_time:.1f}s\n"
+                f"⚠️ No detailed land cover statistics available for this region\n"
+                f"🛰️ Images processed: {confident_images}/{collection_size}\n"
+                f"🗺️ Map tiles: {'✅ Available' if mode_tile_url else '❌ Failed'}"
+            )
+        
+        # Create enriched ROI feature for return with full service metadata
+        roi_feature = {
+            "type": "Feature",
+            "properties": {
+                "name": f"LULC Analysis ROI ({roi_source})",
+                "area_km2": roi_area,
+                "dominant_class": dominant_class,
+                "num_classes_detected": num_classes,
+                "processing_time_seconds": processing_time,
+                "histogram_method": histogram_method,
+                "mode_tile_url": mode_tile_url,
+                "median_tile_url": median_tile_url,
+                "source_locations": [loc.get("matched_name") for loc in locations] if locations else [],
+                "analysis_type": "lulc_dynamic_world",
+                "land_cover_percentages": class_percentages,
+                "data_quality": {
+                    "images_used": confident_images,
+                    "total_images": collection_size,
+                    "confidence_threshold": confidence_used,
+                    "average_confidence": avg_confidence,
+                    "date_range": date_range,
+                    "scale_meters": metadata.get("scale_meters", scale)
+                },
+                "service_metadata": {
+                    "debug_info": debug_info,
+                    "datasets_used": service_result.get("datasets_used", []),
+                    "success": service_result.get("success", False)
+                }
+            },
+            "geometry": roi_geometry,
+        }
+        
+        evidence = list(state.get("evidence", []))
+        evidence.append(f"gee_service:lulc_analysis_success")
+        evidence.append(f"gee_service:roi_source_{roi_source}")
+        evidence.append(f"gee_service:processing_time_{processing_time:.1f}s")
+        
+        print(f"✅ GEE Service integration successful!")
+        print(f"⏱️ Processing time: {processing_time:.1f}s")
+        print(f"📊 ROI area: {roi_area:.2f} km²")
+        
+        return {
+            "analysis": analysis,
+            "roi": roi_feature,
+            "evidence": evidence,
+            "service_result": service_result,
+            "processing_time": processing_time
+        }
+        
+    except requests.exceptions.RequestException as e:
+        # Handle service connection errors
+        evidence = list(state.get("evidence", []))
+        evidence.append(f"gee_service:connection_error")
+        
+        analysis = (
+            f"❌ Failed to connect to GEE service: {str(e)}\n"
+            f"🔧 Ensure the FastAPI service is running on http://localhost:8000\n"
+            f"💡 Start it with: cd backend/app/gee_service && python start.py"
         )
-    else:
-        analysis_prefix = "No explicit location detected – defaulting to a mock ROI near Mumbai. "
-
-    analysis = (
-        analysis_prefix
-        + "Replace with real GEE processing (e.g., buffering, land-cover stats)."
-    )
-
-    evidence = list(state.get("evidence", []))
-    evidence.append("gee_tool:mock_square_roi")
-    return {"analysis": analysis, "roi": roi, "evidence": evidence}
+        
+        return {"analysis": analysis, "roi": None, "evidence": evidence}
+        
+    except Exception as e:
+        # General error fallback
+        evidence = list(state.get("evidence", []))
+        evidence.append(f"gee_service:general_error_{str(e)[:50]}")
+        
+        # Create fallback ROI around Mumbai
+        center_lng, center_lat = 72.8777, 19.0760
+        d = 0.01
+        ring = [
+            [center_lng - d, center_lat - d],
+            [center_lng + d, center_lat - d],
+            [center_lng + d, center_lat + d],
+            [center_lng - d, center_lat + d],
+            [center_lng - d, center_lat - d],
+        ]
+        
+        roi_feature = {
+            "type": "Feature",
+            "properties": {
+                "name": "Fallback ROI (Service Error)",
+                "error": str(e),
+                "source_locations": [loc.get("matched_name") for loc in state.get("locations", [])],
+            },
+            "geometry": {"type": "Polygon", "coordinates": [ring]},
+        }
+        
+        analysis = f"❌ GEE service integration failed: {str(e)}"
+        
+        return {"analysis": analysis, "roi": roi_feature, "evidence": evidence}
 
 
 def rag_tool_node(state: AgentState) -> Dict[str, Any]:

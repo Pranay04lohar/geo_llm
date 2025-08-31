@@ -32,7 +32,9 @@ except ImportError:
                 "chennai": (13.0827, 80.2707),
                 "hyderabad": (17.3850, 78.4867),
                 "punjab": (31.1471, 75.3412),
-                "ludhiana": (30.9010, 75.8573)
+                "ludhiana": (30.9010, 75.8573),
+                "udaipur": (24.5854, 73.7125),  # Add Udaipur coordinates
+                "rajasthan": (26.9124, 75.7873)  # Add Rajasthan coordinates
             }
             
             query_lower = query.lower()
@@ -238,12 +240,12 @@ class ROIHandler:
     def _get_buffer_size(self, location_type: str) -> float:
         """Get appropriate buffer size based on location type."""
         buffer_sizes = {
-            "city": 15,      # 15km for cities
-            "state": 50,     # 50km for states  
-            "district": 25,  # 25km for districts
-            "town": 8,       # 8km for towns
-            "village": 3,    # 3km for villages
-            "coordinates": 5 # 5km for raw coordinates
+            "city": 2,       # 5km for cities (more reasonable for urban analysis)
+            "state": 20,     # 50km for states  
+            "district": 10,  # 25km for districts
+            "town": 4,       # 4km for towns
+            "village": 2,    # 2km for villages
+            "coordinates": 3 # 3km for raw coordinates
         }
         
         return buffer_sizes.get(location_type.lower(), 10)  # Default 10km
@@ -294,6 +296,43 @@ class ROIHandler:
         
         return places[:3]  # Return max 3 potential places
         
+    def _create_roi_from_location(self, location_name: str, location_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Create ROI from a location name and type.
+        
+        Args:
+            location_name: Name of the location
+            location_type: Type of location (city, state, etc.)
+            
+        Returns:
+            ROI dict with geometry and metadata, or None if location not found
+        """
+        # Try to find coordinates for the location
+        coords = self._geocode_location(location_name)
+        if not coords:
+            return None
+            
+        lat, lng = coords
+        
+        # Determine buffer size based on location type
+        buffer_km = self._get_buffer_size(location_type)
+        
+        # Create ROI geometry
+        roi_geometry = self._create_buffer_geometry(lat, lng, buffer_km)
+        
+        return {
+            "source": "llm_locations",
+            "primary_location": {
+                "name": location_name,
+                "type": location_type,
+                "lat": lat,
+                "lng": lng,
+                "confidence": 90
+            },
+            "buffer_km": buffer_km,
+            "geometry": roi_geometry
+        }
+
     def _create_buffer_geometry(self, lat: float, lng: float, buffer_km: float) -> Dict[str, Any]:
         """
         Create a simple rectangular buffer around a point.

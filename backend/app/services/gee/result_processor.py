@@ -79,7 +79,7 @@ class ResultProcessor:
         # ROI Information
         analysis_parts.append(f"📍 Region: {location_name}")
         analysis_parts.append(f"📐 Area: {area_km2:.2f} km²")
-        analysis_parts.append(f"🎯 Analysis Type: {analysis_type.replace('_', ' ').title()}")
+        analysis_parts.append(f"🎯 Analysis Type: {(analysis_type or 'general').replace('_', ' ').title()}")
         analysis_parts.append("")
         
         # Analysis-specific results
@@ -479,23 +479,65 @@ class ResultProcessor:
             })
             
         elif analysis_type == "climate_analysis":
-            # Extract climate statistics
-            temp_stats = gee_result.get("climate_statistics", {})
-            precip_stats = gee_result.get("precipitation_statistics", {})
-            air_quality = gee_result.get("air_quality_statistics", {})
-            veg_stats = gee_result.get("vegetation_statistics", {})
-            
-            # Temperature (convert from Kelvin to Celsius)
-            temp_mean = temp_stats.get("temperature_2m_mean", 0)
-            temp_mean_c = (temp_mean - 273.15) if temp_mean > 0 else 0
-            
+            # Extract climate statistics from new template format
             key_stats.update({
                 "roi_area_km2": gee_result.get("roi_area_km2", 0),
-                "temperature_celsius": temp_mean_c,
-                "precipitation_mm": precip_stats.get("total_precipitation_sum_sum", 0) * 1000,  # Convert to mm
-                "no2_concentration": air_quality.get("tropospheric_NO2_column_number_density", 0),
-                "vegetation_ndvi": veg_stats.get("NDVI_mean", 0),
-                "soil_moisture": gee_result.get("hydrological_statistics", {}).get("SoilMoi0_10cm_inst", 0)
+                "temperature_celsius": gee_result.get("temperature_celsius", 0),
+                "precipitation_mm": gee_result.get("precipitation_mm", 0),
+                "soil_moisture": gee_result.get("soil_moisture_stats", {}).get("SoilMoi0_10cm_inst", 0),
+                "evapotranspiration": gee_result.get("evapotranspiration_stats", {}).get("Evap_tavg", 0),
+                "humidity": gee_result.get("humidity_stats", {}).get("Qair_f_inst", 0)
+            })
+            
+        elif analysis_type == "population_density":
+            # Extract population statistics
+            key_stats.update({
+                "roi_area_km2": gee_result.get("roi_area_km2", 0),
+                "total_population": gee_result.get("total_population", 0),
+                "urban_area_km2": gee_result.get("urban_area_km2", 0),
+                "population_density_mean": gee_result.get("population_density_stats", {}).get("UN_2015_mean", 0)
+            })
+            
+        elif analysis_type == "forest_cover":
+            # Extract forest statistics
+            key_stats.update({
+                "roi_area_km2": gee_result.get("roi_area_km2", 0),
+                "forest_area_km2": gee_result.get("forest_area_km2", 0),
+                "forest_loss_area_km2": gee_result.get("forest_loss_area_km2", 0),
+                "forest_gain_area_km2": gee_result.get("forest_gain_area_km2", 0),
+                "high_vegetation_area_km2": gee_result.get("high_vegetation_area_km2", 0),
+                "tree_cover_mean": gee_result.get("tree_cover_stats", {}).get("treecover2000_mean", 0)
+            })
+            
+        elif analysis_type == "lulc_analysis":
+            # Extract land use statistics
+            key_stats.update({
+                "roi_area_km2": gee_result.get("roi_area_km2", 0),
+                "built_up_area_km2": gee_result.get("built_up_area_km2", 0),
+                "cropland_area_km2": gee_result.get("cropland_area_km2", 0),
+                "forest_area_km2": gee_result.get("forest_area_km2", 0),
+                "grassland_area_km2": gee_result.get("grassland_area_km2", 0),
+                "water_area_km2": gee_result.get("water_area_km2", 0),
+                "bare_soil_area_km2": gee_result.get("bare_soil_area_km2", 0)
+            })
+            
+        elif analysis_type == "soil_analysis":
+            # Extract soil statistics
+            key_stats.update({
+                "roi_area_km2": gee_result.get("roi_area_km2", 0),
+                "soil_ph_mean": gee_result.get("soil_ph_stats", {}).get("phh2o_0-5cm_mean", 0),
+                "organic_carbon_mean": gee_result.get("organic_carbon_stats", {}).get("soc_0-5cm_mean", 0),
+                "clay_content_mean": gee_result.get("clay_stats", {}).get("clay_0-5cm_mean", 0),
+                "sand_content_mean": gee_result.get("sand_stats", {}).get("sand_0-5cm_mean", 0),
+                "silt_content_mean": gee_result.get("silt_stats", {}).get("silt_0-5cm_mean", 0)
+            })
+            
+        elif analysis_type == "transportation_network":
+            # Extract transportation statistics
+            key_stats.update({
+                "roi_area_km2": gee_result.get("roi_area_km2", 0),
+                "built_up_area_km2": gee_result.get("built_up_area_km2", 0),
+                "ndbi_mean": gee_result.get("ndbi_stats", {}).get("NDBI_mean", 0)
             })
             
         elif analysis_type == "change_detection":
