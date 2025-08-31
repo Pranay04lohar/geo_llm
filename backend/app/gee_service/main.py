@@ -91,6 +91,8 @@ class LULCRequest(GEERequest):
     """LULC-specific request parameters"""
     confidenceThreshold: float = 0.5
     maxCloudCover: int = 20
+    exactComputation: bool = False
+    includeMedianVis: bool = False
 
 class TileResponse(BaseModel):
     """Response model for tile-based analysis"""
@@ -181,7 +183,9 @@ async def analyze_lulc_dynamic_world(request: LULCRequest):
             end_date=request.endDate,
             confidence_threshold=request.confidenceThreshold,
             scale=request.scale,
-            max_pixels=request.maxPixels
+            max_pixels=request.maxPixels,
+            exact_computation=request.exactComputation,
+            include_median_vis=request.includeMedianVis
         )
         
         if not result.get("success", False):

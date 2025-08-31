@@ -21,7 +21,7 @@ MUMBAI_GEOMETRY = {
     ]]
 }
 
-def test_lulc_service(base_url: str = "http://localhost:8001"):
+def test_lulc_service(base_url: str = "http://localhost:8000"):
     """Test the LULC Dynamic World endpoint"""
     
     print("🚀 Testing LULC FastAPI Service")
@@ -46,7 +46,7 @@ def test_lulc_service(base_url: str = "http://localhost:8001"):
         "geometry": MUMBAI_GEOMETRY,
         "startDate": "2023-01-01",
         "endDate": "2023-12-31",
-        "confidenceThreshold": 0.5,
+        "confidenceThreshold": 0.3,
         "scale": 10,
         "maxPixels": 1e13
     }
