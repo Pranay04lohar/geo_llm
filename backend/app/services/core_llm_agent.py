@@ -657,25 +657,41 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             roi_geometry = roi_info.get("geometry")
             roi_source = "default_mumbai"
         
-        # Step 2: Check if this is an LULC-related query
+        # Step 2: Determine analysis type based on query content
         query_lower = user_query.lower()
-        is_lulc_query = any(keyword in query_lower for keyword in [
-            "land", "cover", "urban", "vegetation", "built", "crop", "forest", 
-            "lulc", "land use", "land cover", "classification", "satellite"
+        
+        # Check for NDVI/vegetation-specific queries
+        is_ndvi_query = any(keyword in query_lower for keyword in [
+            "ndvi", "vegetation", "greenness", "plant", "tree", "forest health",
+            "vegetation index", "canopy", "biomass", "chlorophyll", "photosynthesis",
+            "vegetation analysis", "vegetation health", "green cover", "leaf"
         ])
         
-        if not is_lulc_query:
-            # For now, default to LULC analysis for all queries
-            print("ℹ️ Query not explicitly LULC-related, defaulting to LULC analysis")
+        # Check for LULC-specific queries
+        is_lulc_query = any(keyword in query_lower for keyword in [
+            "land use", "land cover", "lulc", "urban", "built", "classification",
+            "developed", "settlement", "infrastructure", "city", "agricultural",
+            "cropland", "farming"
+        ])
+        
+        # Determine service to use
+        if is_ndvi_query and not is_lulc_query:
+            analysis_type = "ndvi"
+            print("🌿 Detected NDVI/vegetation analysis query")
+        elif is_lulc_query and not is_ndvi_query:
+            analysis_type = "lulc"
+            print("🗺️ Detected LULC analysis query")
+        else:
+            # Default or mixed queries - use LULC as it's more general
+            analysis_type = "lulc"
+            print("ℹ️ Using LULC analysis as default/mixed query type")
         
         # Step 3: Call the optimized FastAPI gee_service
-        print(f"🚀 Calling optimized GEE service for LULC analysis")
+        print(f"🚀 Calling optimized GEE service for {analysis_type.upper()} analysis")
         print(f"📐 ROI source: {roi_source}")
         
         import requests
         
-        # Prepare request for FastAPI gee_service
-        service_url = "http://localhost:8000/lulc/dynamic-world"
         # Determine analysis parameters based on ROI buffer size
         buffer_km = roi_info.get("buffer_km", 10) if roi_info else 10
         if buffer_km:
@@ -684,19 +700,34 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         else:
             scale = 30
         
-        payload = {
-            "geometry": roi_geometry,
-            "startDate": "2023-01-01", 
-            "endDate": "2023-12-31",
-            "confidenceThreshold": 0.5,
-            "scale": scale,
-            "maxPixels": 1e9,
-            "exactComputation": False,
-            "includeMedianVis": False  # Can be enabled for advanced visualization
-        }
+        # Prepare service-specific request
+        if analysis_type == "ndvi":
+            service_url = "http://localhost:8000/ndvi/vegetation-analysis"
+            payload = {
+                "geometry": roi_geometry,
+                "startDate": "2023-01-01",
+                "endDate": "2023-12-31", 
+                "cloudThreshold": 20,
+                "scale": scale,
+                "maxPixels": 1e9,
+                "includeTimeSeries": True,
+                "exactComputation": False
+            }
+        else:  # LULC analysis
+            service_url = "http://localhost:8000/lulc/dynamic-world"
+            payload = {
+                "geometry": roi_geometry,
+                "startDate": "2023-01-01", 
+                "endDate": "2023-12-31",
+                "confidenceThreshold": 0.5,
+                "scale": scale,
+                "maxPixels": 1e9,
+                "exactComputation": False,
+                "includeMedianVis": False
+            }
         
         # Call the optimized service
-        response = requests.post(service_url, json=payload, timeout=60)
+        response = requests.post(service_url, json=payload, timeout=120)  # Longer timeout for NDVI
         response.raise_for_status()
         
         service_result = response.json()
@@ -705,75 +736,148 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         processing_time = service_result.get("processing_time_seconds", 0)
         roi_area = service_result.get("roi_area_km2", 0)
         map_stats = service_result.get("mapStats", {})
-        class_percentages = map_stats.get("class_percentages", {})
-        dominant_class = map_stats.get("dominant_class", "Unknown")
-        num_classes = map_stats.get("num_classes_detected", 0)
         
-        # Enhanced URLs and metadata
-        visualization = service_result.get("visualization", {})
-        mode_tile_url = visualization.get("mode_tile_url", "")
-        median_tile_url = visualization.get("median_tile_url")
+        # Handle different result formats for LULC vs NDVI
+        if analysis_type == "ndvi":
+            # NDVI-specific results
+            ndvi_stats = map_stats.get("ndvi_statistics", {})
+            veg_distribution = map_stats.get("vegetation_distribution", {})
+            time_series = map_stats.get("time_series", {})
+            mean_ndvi = ndvi_stats.get("mean", 0)
+            dominant_class = f"NDVI: {mean_ndvi:.3f}"
+            num_classes = len(veg_distribution)
+        else:
+            # LULC-specific results
+            class_percentages = map_stats.get("class_percentages", {})
+            dominant_class = map_stats.get("dominant_class", "Unknown")
+            num_classes = map_stats.get("num_classes_detected", 0)
+        
+        # Enhanced URLs and metadata (handle both service formats)
+        if analysis_type == "ndvi":
+            tile_url = service_result.get("urlFormat", "")
+            mode_tile_url = tile_url
+            median_tile_url = None
+        else:
+            visualization = service_result.get("visualization", {})
+            mode_tile_url = visualization.get("mode_tile_url", "")
+            median_tile_url = visualization.get("median_tile_url")
         
         metadata = service_result.get("metadata", {})
         debug_info = service_result.get("debug", {})
         
-        # Extract enriched metadata
-        confidence_used = metadata.get("confidence_threshold_used", 0.5)
-        collection_size = metadata.get("collection_size", 0)
-        confident_images = metadata.get("confident_images_used", 0)
-        histogram_method = debug_info.get("histogram_method", "unknown")
-        avg_confidence = metadata.get("average_confidence")
-        date_range = metadata.get("actual_date_range", {})
+        # Extract enriched metadata (compatible with both services)
+        if analysis_type == "ndvi":
+            cloud_threshold = metadata.get("cloud_threshold", 20)
+            collection_size = metadata.get("collection_size", 0)
+            confident_images = collection_size  # All images for NDVI
+            histogram_method = debug_info.get("histogram_method", "unknown")
+            avg_confidence = None
+            date_range = {}
+        else:
+            confidence_used = metadata.get("confidence_threshold_used", 0.5)
+            collection_size = metadata.get("collection_size", 0)
+            confident_images = metadata.get("confident_images_used", 0)
+            histogram_method = debug_info.get("histogram_method", "unknown")
+            avg_confidence = metadata.get("average_confidence")
+            date_range = metadata.get("actual_date_range", {})
         
-        # Generate comprehensive analysis text
-        if class_percentages:
-            # Create percentage summary
-            top_classes = sorted(class_percentages.items(), key=lambda x: x[1], reverse=True)[:5]
-            percentage_text = "\n".join([f"   • {cls}: {pct}%" for cls, pct in top_classes])
+        # Generate comprehensive analysis text based on analysis type
+        if analysis_type == "ndvi":
+            # NDVI-specific analysis text
+            description = service_result.get("extraDescription", "")
             
             analysis = (
-                f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
+                f"🌿 NDVI Vegetation Analysis - {roi_source.replace('_', ' ').title()}\n"
                 f"{'=' * 60}\n"
                 f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
                 f"📊 Area analyzed: {roi_area:.2f} km²\n"
                 f"⏱️ Processing time: {processing_time:.1f}s ({histogram_method} method)\n"
-                f"🏆 Dominant land cover: {dominant_class}\n"
-                f"📈 Classes detected: {num_classes}/9 Dynamic World classes\n\n"
-                f"📋 Land Cover Distribution:\n{percentage_text}\n\n"
-                f"🛰️ Data Quality:\n"
-                f"   • Satellite images used: {confident_images}/{collection_size}\n"
-                f"   • Confidence threshold: {confidence_used}\n"
-                f"   • Date range: {date_range.get('min_date', 'N/A')} to {date_range.get('max_date', 'N/A')}\n"
+                f"🌱 Mean NDVI: {mean_ndvi:.3f}\n"
+                f"📈 Vegetation categories: {num_classes}\n\n"
+                f"📋 NDVI Statistics:\n"
+                f"   • Mean: {ndvi_stats.get('mean', 0):.3f}\n"
+                f"   • Min: {ndvi_stats.get('min', 0):.3f}\n"
+                f"   • Max: {ndvi_stats.get('max', 0):.3f}\n"
+                f"   • Std Dev: {ndvi_stats.get('std_dev', 0):.3f}\n\n"
             )
             
-            if avg_confidence:
-                analysis += f"   • Average confidence: {avg_confidence:.1%}\n"
-                
-            analysis += f"\n🗺️ Interactive Visualization:\n"
-            analysis += f"   • Mode tile URL: {'✅ Available' if mode_tile_url else '❌ Failed'}\n"
+            if veg_distribution:
+                analysis += f"🌿 Vegetation Distribution:\n"
+                for category, percentage in veg_distribution.items():
+                    category_name = category.replace('_', ' ').title()
+                    analysis += f"   • {category_name}: {percentage}%\n"
+                analysis += "\n"
             
-            if median_tile_url:
-                analysis += f"   • Median tile URL: ✅ Available\n"
+            if time_series and "data" in time_series:
+                method = time_series.get("method", "unknown")
+                data_points = len(time_series["data"])
+                analysis += f"📊 Time-Series Analysis:\n"
+                analysis += f"   • Method: {method}\n"
+                analysis += f"   • Data points: {data_points}\n\n"
+            
+            analysis += f"🛰️ Data Quality:\n"
+            analysis += f"   • Sentinel-2 images used: {confident_images}\n"
+            analysis += f"   • Cloud threshold: {cloud_threshold}%\n\n"
+            
+            if description:
+                analysis += f"📝 Analysis Summary:\n   {description}\n\n"
                 
+            analysis += f"🗺️ Interactive Visualization:\n"
+            analysis += f"   • NDVI tile URL: {'✅ Available' if mode_tile_url else '❌ Failed'}\n"
+            
             if mode_tile_url:
                 analysis += f"\n🔗 Map Tile URL: {mode_tile_url[:100]}{'...' if len(mode_tile_url) > 100 else ''}"
+                
         else:
-            analysis = (
-                f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
-                f"{'=' * 60}\n"
-                f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
-                f"📊 Area analyzed: {roi_area:.2f} km²\n"
-                f"⏱️ Processing time: {processing_time:.1f}s\n"
-                f"⚠️ No detailed land cover statistics available for this region\n"
-                f"🛰️ Images processed: {confident_images}/{collection_size}\n"
-                f"🗺️ Map tiles: {'✅ Available' if mode_tile_url else '❌ Failed'}"
-            )
+            # LULC-specific analysis text (existing logic)
+            if class_percentages:
+                # Create percentage summary
+                top_classes = sorted(class_percentages.items(), key=lambda x: x[1], reverse=True)[:5]
+                percentage_text = "\n".join([f"   • {cls}: {pct}%" for cls, pct in top_classes])
+                
+                analysis = (
+                    f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
+                    f"{'=' * 60}\n"
+                    f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
+                    f"📊 Area analyzed: {roi_area:.2f} km²\n"
+                    f"⏱️ Processing time: {processing_time:.1f}s ({histogram_method} method)\n"
+                    f"🏆 Dominant land cover: {dominant_class}\n"
+                    f"📈 Classes detected: {num_classes}/9 Dynamic World classes\n\n"
+                    f"📋 Land Cover Distribution:\n{percentage_text}\n\n"
+                    f"🛰️ Data Quality:\n"
+                    f"   • Satellite images used: {confident_images}/{collection_size}\n"
+                    f"   • Confidence threshold: {confidence_used}\n"
+                    f"   • Date range: {date_range.get('min_date', 'N/A')} to {date_range.get('max_date', 'N/A')}\n"
+                )
+                
+                if avg_confidence:
+                    analysis += f"   • Average confidence: {avg_confidence:.1%}\n"
+                    
+                analysis += f"\n🗺️ Interactive Visualization:\n"
+                analysis += f"   • Mode tile URL: {'✅ Available' if mode_tile_url else '❌ Failed'}\n"
+                
+                if median_tile_url:
+                    analysis += f"   • Median tile URL: ✅ Available\n"
+                    
+                if mode_tile_url:
+                    analysis += f"\n🔗 Map Tile URL: {mode_tile_url[:100]}{'...' if len(mode_tile_url) > 100 else ''}"
+            else:
+                analysis = (
+                    f"🌍 Land Use/Land Cover Analysis - {roi_source.replace('_', ' ').title()}\n"
+                    f"{'=' * 60}\n"
+                    f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
+                    f"📊 Area analyzed: {roi_area:.2f} km²\n"
+                    f"⏱️ Processing time: {processing_time:.1f}s\n"
+                    f"⚠️ No detailed land cover statistics available for this region\n"
+                    f"🛰️ Images processed: {confident_images}/{collection_size}\n"
+                    f"🗺️ Map tiles: {'✅ Available' if mode_tile_url else '❌ Failed'}"
+                )
         
         # Create enriched ROI feature for return with full service metadata
         roi_feature = {
             "type": "Feature",
             "properties": {
-                "name": f"LULC Analysis ROI ({roi_source})",
+                "name": f"{analysis_type.upper()} Analysis ROI ({roi_source})",
                 "area_km2": roi_area,
                 "dominant_class": dominant_class,
                 "num_classes_detected": num_classes,
@@ -782,16 +886,7 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 "mode_tile_url": mode_tile_url,
                 "median_tile_url": median_tile_url,
                 "source_locations": [loc.get("matched_name") for loc in locations] if locations else [],
-                "analysis_type": "lulc_dynamic_world",
-                "land_cover_percentages": class_percentages,
-                "data_quality": {
-                    "images_used": confident_images,
-                    "total_images": collection_size,
-                    "confidence_threshold": confidence_used,
-                    "average_confidence": avg_confidence,
-                    "date_range": date_range,
-                    "scale_meters": metadata.get("scale_meters", scale)
-                },
+                "analysis_type": f"{analysis_type}_analysis",
                 "service_metadata": {
                     "debug_info": debug_info,
                     "datasets_used": service_result.get("datasets_used", []),
@@ -801,8 +896,29 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             "geometry": roi_geometry,
         }
         
+        # Add analysis-specific data
+        if analysis_type == "ndvi":
+            roi_feature["properties"]["ndvi_statistics"] = ndvi_stats
+            roi_feature["properties"]["vegetation_distribution"] = veg_distribution
+            roi_feature["properties"]["time_series"] = time_series
+            roi_feature["properties"]["data_quality"] = {
+                "images_used": confident_images,
+                "cloud_threshold": cloud_threshold,
+                "scale_meters": metadata.get("scale_meters", scale)
+            }
+        else:
+            roi_feature["properties"]["land_cover_percentages"] = class_percentages
+            roi_feature["properties"]["data_quality"] = {
+                "images_used": confident_images,
+                "total_images": collection_size,
+                "confidence_threshold": confidence_used,
+                "average_confidence": avg_confidence,
+                "date_range": date_range,
+                "scale_meters": metadata.get("scale_meters", scale)
+            }
+        
         evidence = list(state.get("evidence", []))
-        evidence.append(f"gee_service:lulc_analysis_success")
+        evidence.append(f"gee_service:{analysis_type}_analysis_success")
         evidence.append(f"gee_service:roi_source_{roi_source}")
         evidence.append(f"gee_service:processing_time_{processing_time:.1f}s")
         

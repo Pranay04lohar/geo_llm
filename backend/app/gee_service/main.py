@@ -94,6 +94,12 @@ class LULCRequest(GEERequest):
     exactComputation: bool = False
     includeMedianVis: bool = False
 
+class NDVIRequest(GEERequest):
+    """NDVI-specific request parameters"""
+    cloudThreshold: int = 20
+    includeTimeSeries: bool = True
+    exactComputation: bool = False
+
 class TileResponse(BaseModel):
     """Response model for tile-based analysis"""
     urlFormat: str
@@ -131,19 +137,51 @@ async def root():
         "endpoints": [
             "/health",
             "/lulc/dynamic-world",
+            "/ndvi/vegetation-analysis",
             "/docs"
         ]
     }
 
-# Import LULC service
+# Import services
 try:
     from services.lulc_service import LULCService
-except ImportError:
+    logger.info("✅ Successfully imported LULCService")
+    
+    # Try to import NDVIService with detailed error logging
+    try:
+        from services.ndvi_service import NDVIService
+        logger.info("✅ Successfully imported NDVIService")
+    except Exception as ndvi_import_error:
+        logger.error(f"❌ Failed to import NDVIService: {ndvi_import_error}")
+        logger.error(f"❌ Error type: {type(ndvi_import_error)}")
+        import traceback
+        logger.error(f"❌ Import traceback:")
+        logger.error(traceback.format_exc())
+        
+        # Create a dummy service so the app can still start
+        class NDVIService:
+            @staticmethod
+            def analyze_ndvi(**kwargs):
+                raise Exception(f"NDVIService import failed: {ndvi_import_error}")
+        
+except ImportError as general_import_error:
+    logger.error(f"❌ General import error: {general_import_error}")
     # Fallback for direct execution
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), 'services'))
     from services.lulc_service import LULCService
+    
+    try:
+        from services.ndvi_service import NDVIService
+        logger.info("✅ Successfully imported NDVIService via fallback")
+    except Exception as fallback_error:
+        logger.error(f"❌ Fallback import also failed: {fallback_error}")
+        
+        class NDVIService:
+            @staticmethod
+            def analyze_ndvi(**kwargs):
+                raise Exception(f"NDVIService fallback import failed: {fallback_error}")
 
 @app.post("/lulc/dynamic-world", response_model=TileResponse)
 async def analyze_lulc_dynamic_world(request: LULCRequest):
@@ -211,4 +249,99 @@ async def analyze_lulc_dynamic_world(request: LULCRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
+        )
+
+@app.post("/ndvi/vegetation-analysis", response_model=TileResponse)
+async def analyze_ndvi_vegetation(request: NDVIRequest):
+    """
+    High-performance NDVI vegetation analysis using Sentinel-2
+    
+    Features:
+    - Time-series NDVI analysis (weekly/monthly/yearly aggregation)
+    - Robust histogram extraction with multiple fallback methods
+    - Cloud masking and quality filtering
+    - Vegetation health assessment and distribution analysis
+    - Tile URLs for immediate map visualization
+    
+    Returns:
+    - Tile URL for NDVI visualization
+    - NDVI statistics and vegetation distribution
+    - Time-series data for trend analysis
+    - Processing metadata and quality metrics
+    """
+    if not GEE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Earth Engine not available"
+        )
+    
+    if not gee_initialized:
+        raise HTTPException(
+            status_code=503, 
+            detail="GEE client not initialized"
+        )
+    
+    logger.info(f"🌱 Starting NDVI analysis for geometry: {request.geometry.get('type', 'Unknown')}")
+    
+    try:
+        # Debug: Log all parameters
+        logger.info(f"🔧 NDVI Parameters:")
+        logger.info(f"   - start_date: {request.startDate}")
+        logger.info(f"   - end_date: {request.endDate}")
+        logger.info(f"   - cloud_threshold: {request.cloudThreshold}")
+        logger.info(f"   - scale: {request.scale}")
+        logger.info(f"   - max_pixels: {request.maxPixels}")
+        logger.info(f"   - include_time_series: {request.includeTimeSeries}")
+        logger.info(f"   - exact_computation: {request.exactComputation}")
+        
+        # Debug: Check if NDVIService is available
+        logger.info(f"🔧 NDVIService class: {NDVIService}")
+        logger.info(f"🔧 NDVIService.analyze_ndvi method: {NDVIService.analyze_ndvi}")
+        
+        # Call the NDVI service
+        logger.info("🔧 Calling NDVIService.analyze_ndvi...")
+        result = NDVIService.analyze_ndvi(
+            geometry=request.geometry,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            cloud_threshold=request.cloudThreshold,
+            scale=request.scale,
+            max_pixels=request.maxPixels,
+            include_time_series=request.includeTimeSeries,
+            exact_computation=request.exactComputation
+        )
+        logger.info(f"🔧 NDVIService.analyze_ndvi returned: {type(result)}")
+        
+        if not result.get("success", False):
+            # Handle service-level errors
+            error_detail = result.get("error", "Unknown error")
+            error_type = result.get("error_type", "unknown")
+            
+            if error_type == "quota_exceeded":
+                raise HTTPException(status_code=429, detail=error_detail)
+            elif error_type == "timeout":
+                raise HTTPException(status_code=408, detail=error_detail)
+            elif error_type == "no_data":
+                raise HTTPException(status_code=404, detail=error_detail)
+            else:
+                raise HTTPException(status_code=500, detail=error_detail)
+        
+        logger.info(f"✅ NDVI analysis completed successfully in {result.get('processing_time_seconds', 0)}s")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in NDVI endpoint: {str(e)}")
+        logger.error(f"❌ Error type: {type(e)}")
+        
+        # Import traceback for detailed error info
+        import traceback
+        logger.error(f"❌ Full traceback:")
+        logger.error(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {type(e).__name__}: {str(e)}"
         )
