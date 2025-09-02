@@ -19,6 +19,14 @@ import ee
 
 logger = logging.getLogger(__name__)
 
+# Initialize Earth Engine
+try:
+    ee.Initialize()
+    logger.info("✅ Earth Engine initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Earth Engine: {e}")
+    logger.info("💡 Run 'earthengine authenticate' to set up credentials")
+
 class NDVIService:
     """High-performance NDVI analysis service with time-series capabilities"""
     
@@ -102,19 +110,19 @@ class NDVIService:
         except Exception as e:
             logger.warning(f"NDVI FrequencyHistogram failed: {e}")
         
-        # Method 2: Fallback to sampling
+        # Method 2: Fallback to sampling (optimized for speed)
         if not histogram:
             try:
-                logger.info("Fallback: Using NDVI sample method...")
-                # Scale sampling with ROI size
-                num_pixels = min(int(roi_area_km2 * 15), 8000)  # More samples for NDVI
-                num_pixels = max(num_pixels, 1000)  # Minimum 1000 samples
+                logger.info("Fallback: Using optimized NDVI sample method...")
+                # Reduce sampling for faster processing
+                num_pixels = min(int(roi_area_km2 * 8), 4000)  # Reduced samples for speed
+                num_pixels = max(num_pixels, 500)  # Reduced minimum samples
                 
                 logger.info(f"Sampling {num_pixels} NDVI points for {roi_area_km2:.2f} km² ROI")
                 
                 sample_points = ndvi_image.sample(
                     region=geometry,
-                    scale=scale * 2,
+                    scale=max(scale * 2, 60),  # Use larger scale for faster sampling
                     numPixels=num_pixels,
                     dropNulls=True
                 ).getInfo()

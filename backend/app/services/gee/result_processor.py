@@ -107,19 +107,25 @@ class ResultProcessor:
         return "\n".join(analysis_parts)
         
     def _format_ndvi_results(self, gee_result: Dict[str, Any]) -> List[str]:
-        """Format NDVI analysis results."""
+        """Format NDVI analysis results from NDVIService or legacy format."""
         results = []
         
-        # Extract NDVI statistics
-        ndvi_stats = gee_result.get("ndvi_stats", {})
-        if ndvi_stats:
-            mean_ndvi = ndvi_stats.get("NDVI_mean", 0)
-            min_ndvi = ndvi_stats.get("NDVI_min", 0)
-            max_ndvi = ndvi_stats.get("NDVI_max", 0)
+        # Handle NDVIService format (new)
+        map_stats = gee_result.get("mapStats", {})
+        if map_stats and "ndvi_statistics" in map_stats:
+            ndvi_stats = map_stats["ndvi_statistics"]
+            vegetation_distribution = map_stats.get("vegetation_distribution", {})
+            time_series = map_stats.get("time_series", {})
+            
+            mean_ndvi = ndvi_stats.get("mean", 0)
+            min_ndvi = ndvi_stats.get("min", 0)
+            max_ndvi = ndvi_stats.get("max", 0)
+            std_dev = ndvi_stats.get("std_dev", 0)
             
             results.append("🌱 Vegetation Health Analysis (NDVI):")
             results.append(f"   • Average NDVI: {mean_ndvi:.3f}")
             results.append(f"   • Range: {min_ndvi:.3f} to {max_ndvi:.3f}")
+            results.append(f"   • Standard Deviation: {std_dev:.3f}")
             
             # Interpret NDVI values
             if mean_ndvi > 0.6:
@@ -133,10 +139,52 @@ class ResultProcessor:
                 
             results.append(f"   • Health Status: {health_status}")
             
-        # Pixel count
-        pixel_count = gee_result.get("pixel_count", {}).get("NDVI", 0)
-        if pixel_count:
-            results.append(f"   • Analyzed Pixels: {pixel_count:,}")
+            # Add vegetation distribution
+            if vegetation_distribution:
+                results.append("")
+                results.append("🌿 Vegetation Distribution:")
+                for category, percentage in vegetation_distribution.items():
+                    category_name = category.replace('_', ' ').title()
+                    results.append(f"   • {category_name}: {percentage}%")
+            
+            # Add time series information
+            if time_series and "data" in time_series:
+                method = time_series.get("method", "unknown")
+                data_points = len(time_series["data"])
+                total_periods = time_series.get(f"total_{method}s", data_points)
+                results.append("")
+                results.append("📊 Time-Series Analysis:")
+                results.append(f"   • Method: {method.title()}")
+                results.append(f"   • Data points: {data_points}/{total_periods}")
+                
+        else:
+            # Handle legacy format
+            ndvi_stats = gee_result.get("ndvi_stats", {})
+            if ndvi_stats:
+                mean_ndvi = ndvi_stats.get("NDVI_mean", 0)
+                min_ndvi = ndvi_stats.get("NDVI_min", 0)
+                max_ndvi = ndvi_stats.get("NDVI_max", 0)
+                
+                results.append("🌱 Vegetation Health Analysis (NDVI):")
+                results.append(f"   • Average NDVI: {mean_ndvi:.3f}")
+                results.append(f"   • Range: {min_ndvi:.3f} to {max_ndvi:.3f}")
+                
+                # Interpret NDVI values
+                if mean_ndvi > 0.6:
+                    health_status = "Excellent (Dense, healthy vegetation)"
+                elif mean_ndvi > 0.4:
+                    health_status = "Good (Moderate vegetation cover)"
+                elif mean_ndvi > 0.2:
+                    health_status = "Fair (Sparse vegetation)"
+                else:
+                    health_status = "Poor (Minimal vegetation)"
+                    
+                results.append(f"   • Health Status: {health_status}")
+                
+            # Pixel count (legacy)
+            pixel_count = gee_result.get("pixel_count", {}).get("NDVI", 0)
+            if pixel_count:
+                results.append(f"   • Analyzed Pixels: {pixel_count:,}")
             
         return results
         
@@ -458,12 +506,35 @@ class ResultProcessor:
         key_stats = {}
         
         if analysis_type == "ndvi":
-            ndvi_stats = gee_result.get("ndvi_stats", {})
-            key_stats.update({
-                "mean_ndvi": ndvi_stats.get("NDVI_mean", 0),
-                "min_ndvi": ndvi_stats.get("NDVI_min", 0),
-                "max_ndvi": ndvi_stats.get("NDVI_max", 0)
-            })
+            # Handle NDVIService format (new)
+            map_stats = gee_result.get("mapStats", {})
+            if map_stats and "ndvi_statistics" in map_stats:
+                ndvi_stats = map_stats["ndvi_statistics"]
+                vegetation_distribution = map_stats.get("vegetation_distribution", {})
+                key_stats.update({
+                    "mean_ndvi": ndvi_stats.get("mean", 0),
+                    "min_ndvi": ndvi_stats.get("min", 0),
+                    "max_ndvi": ndvi_stats.get("max", 0),
+                    "std_dev_ndvi": ndvi_stats.get("std_dev", 0),
+                    "vegetation_distribution": vegetation_distribution,
+                    "roi_area_km2": gee_result.get("roi_area_km2", 0)
+                })
+                
+                # Add time series info if available
+                time_series = map_stats.get("time_series", {})
+                if time_series and "data" in time_series:
+                    key_stats.update({
+                        "time_series_method": time_series.get("method", "unknown"),
+                        "time_series_points": len(time_series["data"])
+                    })
+            else:
+                # Handle legacy format
+                ndvi_stats = gee_result.get("ndvi_stats", {})
+                key_stats.update({
+                    "mean_ndvi": ndvi_stats.get("NDVI_mean", 0),
+                    "min_ndvi": ndvi_stats.get("NDVI_min", 0),
+                    "max_ndvi": ndvi_stats.get("NDVI_max", 0)
+                })
             
         elif analysis_type == "water_analysis":
             water_area_km2 = gee_result.get("water_area_km2", 0)

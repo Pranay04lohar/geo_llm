@@ -121,12 +121,12 @@ class ROIHandler:
             
         lat, lng = coords
         
-        # Determine buffer size based on location type
+        # Get dynamic ROI dimensions based on city characteristics
         location_type = primary_location.get("type", "city").lower()
-        buffer_km = self._get_buffer_size(location_type)
+        dimensions = self._get_dynamic_roi_size(location_type, location_name)
         
-        # Create ROI geometry
-        roi_geometry = self._create_buffer_geometry(lat, lng, buffer_km)
+        # Create ROI geometry with dynamic dimensions
+        roi_geometry = self._create_dynamic_geometry(lat, lng, dimensions)
         
         return {
             "source": "llm_locations",
@@ -138,7 +138,8 @@ class ROIHandler:
                 "confidence": primary_location.get("confidence", 0)
             },
             "all_locations": locations,
-            "buffer_km": buffer_km,
+            "buffer_km": max(dimensions["width"], dimensions["height"]) / 2,  # Equivalent radius for compatibility
+            "dimensions": dimensions,  # Add actual dimensions used
             "geometry": roi_geometry
         }
         
@@ -237,18 +238,42 @@ class ROIHandler:
             
         return None
         
-    def _get_buffer_size(self, location_type: str) -> float:
-        """Get appropriate buffer size based on location type."""
-        buffer_sizes = {
-            "city": 2,       # 5km for cities (more reasonable for urban analysis)
-            "state": 20,     # 50km for states  
-            "district": 10,  # 25km for districts
-            "town": 4,       # 4km for towns
-            "village": 2,    # 2km for villages
-            "coordinates": 3 # 3km for raw coordinates
+    def _get_dynamic_roi_size(self, location_type: str, location_name: str = "") -> Dict[str, float]:
+        """Get dynamic ROI dimensions based on actual city characteristics."""
+        
+        # Real city dimensions (approximate width x height in km) for major Indian cities
+        city_dimensions = {
+            "delhi": {"width": 51, "height": 48},      # ~1484 km² (actual NCT Delhi)
+            "mumbai": {"width": 35, "height": 20},     # ~603 km² (Greater Mumbai)
+            "bangalore": {"width": 40, "height": 35},  # ~741 km² (BBMP area)
+            "hyderabad": {"width": 45, "height": 40},  # ~650 km² (GHMC area)
+            "chennai": {"width": 30, "height": 25},    # ~426 km² (Chennai Corporation)
+            "kolkata": {"width": 35, "height": 30},    # ~206 km² (KMC area)
+            "pune": {"width": 35, "height": 30},       # ~331 km² (PMC area)
+            "ahmedabad": {"width": 40, "height": 35},  # ~505 km² (AMC area)
+            "jaipur": {"width": 35, "height": 30},     # ~467 km² (JMC area)
+            "surat": {"width": 30, "height": 25},      # ~326 km² (SMC area)
+            "lucknow": {"width": 35, "height": 30},    # ~349 km² (LMC area)
+            "kanpur": {"width": 30, "height": 25},     # ~267 km² (KNN area)
         }
         
-        return buffer_sizes.get(location_type.lower(), 10)  # Default 10km
+        # Check for city-specific dimensions first
+        location_lower = location_name.lower()
+        for city, dims in city_dimensions.items():
+            if city in location_lower:
+                return dims
+        
+        # Default dimensions based on location type
+        default_dimensions = {
+            "city": {"width": 30, "height": 25},      # ~400 km² for average city
+            "state": {"width": 200, "height": 150},   # Large state coverage
+            "district": {"width": 80, "height": 60},  # District coverage
+            "town": {"width": 15, "height": 12},      # Small town
+            "village": {"width": 8, "height": 6},     # Village area
+            "coordinates": {"width": 20, "height": 15} # Default coordinate area
+        }
+        
+        return default_dimensions.get(location_type.lower(), {"width": 30, "height": 25})
         
     def _extract_coordinates_from_text(self, text: str) -> Optional[Tuple[float, float]]:
         """Extract lat/lng coordinates from text using regex patterns."""
@@ -314,11 +339,11 @@ class ROIHandler:
             
         lat, lng = coords
         
-        # Determine buffer size based on location type
-        buffer_km = self._get_buffer_size(location_type)
+        # Get dynamic ROI dimensions
+        dimensions = self._get_dynamic_roi_size(location_type, location_name)
         
-        # Create ROI geometry
-        roi_geometry = self._create_buffer_geometry(lat, lng, buffer_km)
+        # Create ROI geometry with dynamic dimensions
+        roi_geometry = self._create_dynamic_geometry(lat, lng, dimensions)
         
         return {
             "source": "llm_locations",
@@ -329,7 +354,8 @@ class ROIHandler:
                 "lng": lng,
                 "confidence": 90
             },
-            "buffer_km": buffer_km,
+            "buffer_km": max(dimensions["width"], dimensions["height"]) / 2,  # Equivalent radius for compatibility
+            "dimensions": dimensions,  # Add actual dimensions used
             "geometry": roi_geometry
         }
 
@@ -358,6 +384,41 @@ class ROIHandler:
             [lng + lng_offset, lat - lat_offset],  # Bottom-right
             [lng + lng_offset, lat + lat_offset],  # Top-right
             [lng - lng_offset, lat + lat_offset],  # Top-left
+            [lng - lng_offset, lat - lat_offset]   # Close polygon
+        ]]
+        
+        return {
+            "type": "Polygon",
+            "coordinates": coordinates
+        }
+    
+    def _create_dynamic_geometry(self, lat: float, lng: float, dimensions: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Create a rectangular ROI based on dynamic city dimensions.
+        
+        Args:
+            lat: Latitude of center point
+            lng: Longitude of center point  
+            dimensions: Dict with 'width' and 'height' in kilometers
+            
+        Returns:
+            GeoJSON Polygon geometry with proper city coverage
+        """
+        width_km = dimensions["width"]
+        height_km = dimensions["height"]
+        
+        # Convert km to approximate degrees
+        # More accurate conversion considering latitude
+        lat_offset = height_km / 2 / 111.0  # Half height north/south
+        lng_offset = width_km / 2 / (111.0 * abs(lat / 90.0) + 0.1)  # Half width east/west, adjusted for latitude
+        
+        # Create rectangle coordinates [lng, lat] (GeoJSON format)
+        # This creates a proper rectangular coverage of the city
+        coordinates = [[
+            [lng - lng_offset, lat - lat_offset],  # Southwest corner
+            [lng + lng_offset, lat - lat_offset],  # Southeast corner
+            [lng + lng_offset, lat + lat_offset],  # Northeast corner
+            [lng - lng_offset, lat + lat_offset],  # Northwest corner
             [lng - lng_offset, lat - lat_offset]   # Close polygon
         ]]
         

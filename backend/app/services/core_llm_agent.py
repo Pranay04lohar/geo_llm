@@ -154,6 +154,31 @@ from .gee.hybrid_query_analyzer import HybridQueryAnalyzer
 from .gee.template_loader import TemplateLoader
 from .gee.result_processor import ResultProcessor
 
+# Import NDVI service for direct integration
+import sys
+from pathlib import Path
+# Add the gee_service directory to the path to import NDVIService
+gee_service_path = Path(__file__).parent.parent / "gee_service" / "services"
+if str(gee_service_path) not in sys.path:
+    sys.path.append(str(gee_service_path))
+
+try:
+    from ndvi_service import NDVIService
+    NDVI_SERVICE_AVAILABLE = True
+    print("✅ NDVIService imported successfully")
+except ImportError as e:
+    print(f"Warning: NDVIService not available: {e}")
+    NDVI_SERVICE_AVAILABLE = False
+
+# Also ensure Earth Engine is initialized for any direct EE usage
+try:
+    import ee
+    ee.Initialize()
+    print("✅ Earth Engine initialized in core agent")
+except Exception as e:
+    print(f"⚠️ Earth Engine initialization failed in core agent: {e}")
+    print("💡 This is okay if using NDVIService which handles its own initialization")
+
 
 # --- State Definition ---
 class AgentState(TypedDict, total=False):
@@ -533,9 +558,10 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
             return websearch_tool_node(current_state)
         raise ValueError(f"Unknown tool: {tool_name}")
 
-    # Determine tool for each subtask using explicit mentions or fallback to tools_to_use
+    # Optimize: For GEE_Tool queries, run analysis once and reuse results
     tools_hint: List[str] = plan.get("tools_to_use", [])
-
+    gee_result_cache = None  # Cache GEE results to avoid duplicate calls
+    
     for sub in subtasks:
         step = sub.get("step")
         task_text: str = sub.get("task", "")
@@ -552,7 +578,13 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
             # Fallback: first tool from tools_to_use, else default to Search_Tool
             tool = tools_hint[0] if tools_hint else "Search_Tool"
 
-        tool_output = _run_tool(tool, working_state)
+        # Cache GEE_Tool results to avoid duplicate expensive calls
+        if tool == "GEE_Tool":
+            if gee_result_cache is None:
+                gee_result_cache = _run_tool(tool, working_state)
+            tool_output = gee_result_cache
+        else:
+            tool_output = _run_tool(tool, working_state)
 
         # Collect analysis and ROI
         analysis_piece = tool_output.get("analysis") or f"Executed {tool}"
@@ -686,11 +718,9 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             analysis_type = "lulc"
             print("ℹ️ Using LULC analysis as default/mixed query type")
         
-        # Step 3: Call the optimized FastAPI gee_service
-        print(f"🚀 Calling optimized GEE service for {analysis_type.upper()} analysis")
+        # Step 3: Call the appropriate analysis service
+        print(f"🚀 Running {analysis_type.upper()} analysis")
         print(f"📐 ROI source: {roi_source}")
-        
-        import requests
         
         # Determine analysis parameters based on ROI buffer size
         buffer_km = roi_info.get("buffer_km", 10) if roi_info else 10
@@ -700,42 +730,62 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         else:
             scale = 30
         
-        # Prepare service-specific request
-        if analysis_type == "ndvi":
-            service_url = "http://localhost:8000/ndvi/vegetation-analysis"
-            payload = {
-                "geometry": roi_geometry,
-                "startDate": "2023-01-01",
-                "endDate": "2023-12-31", 
-                "cloudThreshold": 20,
-                "scale": scale,
-                "maxPixels": 1e9,
-                "includeTimeSeries": True,
-                "exactComputation": False
-            }
-        else:  # LULC analysis
-            service_url = "http://localhost:8000/lulc/dynamic-world"
-            payload = {
-                "geometry": roi_geometry,
-                "startDate": "2023-01-01", 
-                "endDate": "2023-12-31",
-                "confidenceThreshold": 0.5,
-                "scale": scale,
-                "maxPixels": 1e9,
-                "exactComputation": False,
-                "includeMedianVis": False
-            }
+        service_result = {}
         
-        # Call the optimized service
-        response = requests.post(service_url, json=payload, timeout=120)  # Longer timeout for NDVI
-        response.raise_for_status()
-        
-        service_result = response.json()
+        if analysis_type == "ndvi" and NDVI_SERVICE_AVAILABLE:
+            # Use NDVIService directly for better integration
+            print("📡 Using direct NDVIService integration")
+            try:
+                # Optimize parameters for faster processing
+                # Reduce time range for faster processing
+                service_result = NDVIService.analyze_ndvi(
+                    geometry=roi_geometry,
+                    start_date="2023-06-01",  # Shorter time range
+                    end_date="2023-08-31",    # 3 months instead of 12
+                    cloud_threshold=30,       # Higher threshold for more images
+                    scale=max(scale, 30),     # Ensure minimum scale for speed
+                    max_pixels=5e8,           # Reduce max pixels by half
+                    include_time_series=False, # Disable time-series for speed
+                    exact_computation=False
+                )
+                
+                if not service_result.get("success", False):
+                    # Handle NDVI service errors
+                    error_msg = service_result.get("error", "Unknown NDVI service error")
+                    error_type = service_result.get("error_type", "unknown")
+                    
+                    evidence = list(state.get("evidence", []))
+                    evidence.append(f"ndvi_service:error_{error_type}")
+                    
+                    analysis = (
+                        f"❌ NDVI Analysis Failed: {error_msg}\n"
+                        f"🔧 Error Type: {error_type}\n"
+                        f"💡 This may be due to data availability or processing limits."
+                    )
+                    
+                    return {"analysis": analysis, "roi": None, "evidence": evidence}
+                    
+            except Exception as e:
+                # Fallback to HTTP request if direct service fails
+                print(f"⚠️ Direct NDVI service failed, falling back to HTTP: {e}")
+                service_result = _fallback_to_http_ndvi_service(roi_geometry, scale)
+                
+        else:
+            # For LULC or when NDVI service unavailable, use HTTP requests
+            print("📡 Using HTTP service integration")
+            service_result = _call_http_service(analysis_type, roi_geometry, scale)
         
         # Step 4: Format results for the agent contract using enhanced metadata
         processing_time = service_result.get("processing_time_seconds", 0)
         roi_area = service_result.get("roi_area_km2", 0)
-        map_stats = service_result.get("mapStats", {})
+        
+        # Handle different service result formats
+        if analysis_type == "ndvi" and NDVI_SERVICE_AVAILABLE:
+            # NDVIService returns results in a specific format
+            map_stats = service_result.get("mapStats", {})
+        else:
+            # HTTP service format
+            map_stats = service_result.get("mapStats", {})
         
         # Handle different result formats for LULC vs NDVI
         if analysis_type == "ndvi":
@@ -827,6 +877,18 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             
             if mode_tile_url:
                 analysis += f"\n🔗 Map Tile URL: {mode_tile_url[:100]}{'...' if len(mode_tile_url) > 100 else ''}"
+            
+            # Add LLM-based interpretation for NDVI (summary mode for production)
+            llm_interpretation = _generate_llm_analysis(
+                query=state.get("query", ""),
+                analysis_type="ndvi",
+                stats=ndvi_stats,
+                vegetation_distribution=veg_distribution,
+                location_name=locations[0].get('matched_name', 'Unknown') if locations else 'Unknown',
+                mode="summary"  # Use summary mode for concise output
+            )
+            if llm_interpretation:
+                analysis += f"\n\n🤖 AI Analysis:\n{llm_interpretation}"
                 
         else:
             # LULC-specific analysis text (existing logic)
@@ -918,9 +980,14 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             }
         
         evidence = list(state.get("evidence", []))
-        evidence.append(f"gee_service:{analysis_type}_analysis_success")
-        evidence.append(f"gee_service:roi_source_{roi_source}")
-        evidence.append(f"gee_service:processing_time_{processing_time:.1f}s")
+        if analysis_type == "ndvi" and NDVI_SERVICE_AVAILABLE:
+            evidence.append(f"ndvi_service:direct_integration_success")
+            evidence.append(f"ndvi_service:processing_time_{processing_time:.1f}s")
+            evidence.append(f"ndvi_service:roi_source_{roi_source}")
+        else:
+            evidence.append(f"gee_service:{analysis_type}_analysis_success")
+            evidence.append(f"gee_service:roi_source_{roi_source}")
+            evidence.append(f"gee_service:processing_time_{processing_time:.1f}s")
         
         print(f"✅ GEE Service integration successful!")
         print(f"⏱️ Processing time: {processing_time:.1f}s")
@@ -976,6 +1043,186 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         analysis = f"❌ GEE service integration failed: {str(e)}"
         
         return {"analysis": analysis, "roi": roi_feature, "evidence": evidence}
+
+
+def _fallback_to_http_ndvi_service(roi_geometry: Dict[str, Any], scale: int) -> Dict[str, Any]:
+    """Fallback to HTTP NDVI service when direct service fails."""
+    import requests
+    
+    try:
+        service_url = "http://localhost:8000/ndvi/vegetation-analysis"
+        payload = {
+            "geometry": roi_geometry,
+            "startDate": "2023-01-01",
+            "endDate": "2023-12-31", 
+            "cloudThreshold": 20,
+            "scale": scale,
+            "maxPixels": 1e9,
+            "includeTimeSeries": True,
+            "exactComputation": False
+        }
+        
+        response = requests.post(service_url, json=payload, timeout=120)
+        response.raise_for_status()
+        return response.json()
+        
+    except Exception as e:
+        print(f"❌ HTTP NDVI fallback also failed: {e}")
+        return {
+            "success": False,
+            "error": f"Both direct and HTTP NDVI services failed: {str(e)}",
+            "error_type": "service_unavailable"
+        }
+
+
+def _generate_llm_analysis(
+    query: str, 
+    analysis_type: str, 
+    stats: Dict[str, Any], 
+    vegetation_distribution: Dict[str, Any],
+    location_name: str,
+    mode: str = "summary"  # "summary" or "detailed"
+) -> str:
+    """Generate LLM-based analysis interpretation of NDVI results."""
+    
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return ""
+    
+    # Prepare context for LLM
+    if analysis_type == "ndvi":
+        mean_ndvi = stats.get("mean", 0)
+        min_ndvi = stats.get("min", 0) 
+        max_ndvi = stats.get("max", 0)
+        std_dev = stats.get("std_dev", 0)
+        
+        # Format vegetation distribution
+        veg_summary = []
+        for category, percentage in vegetation_distribution.items():
+            veg_summary.append(f"{category.replace('_', ' ')}: {percentage}%")
+        
+        context = f"""
+Location: {location_name}
+User Query: {query}
+
+NDVI Analysis Results:
+- Mean NDVI: {mean_ndvi:.3f}
+- NDVI Range: {min_ndvi:.3f} to {max_ndvi:.3f}
+- Standard Deviation: {std_dev:.3f}
+
+Vegetation Distribution:
+{chr(10).join(veg_summary)}
+
+NDVI Interpretation Guide:
+- NDVI < 0.1: Water/bare soil
+- NDVI 0.1-0.3: Sparse vegetation
+- NDVI 0.3-0.6: Moderate vegetation  
+- NDVI > 0.6: Dense vegetation
+"""
+    else:
+        return ""
+    
+    if mode == "summary":
+        system_prompt = (
+            "You are a vegetation and environmental analysis expert. "
+            "First, provide a comprehensive analysis of the NDVI data, then summarize it. "
+            "Your response should have two parts:\n"
+            "1. DETAILED ANALYSIS: Analyze the NDVI data thoroughly including statistics, vegetation distribution, environmental conditions, and patterns.\n"
+            "2. SUMMARY: Condense the key findings into 2-3 clear, actionable sentences (100-150 words max).\n"
+            "Format your response as:\n"
+            "DETAILED ANALYSIS:\n[full analysis]\n\nSUMMARY:\n[concise summary]"
+        )
+        max_tokens = 600
+    else:  # detailed mode
+        system_prompt = (
+            "You are a vegetation and environmental analysis expert. "
+            "Analyze the NDVI data and provide a comprehensive, insightful interpretation "
+            "that directly answers the user's question. Be specific about vegetation health, "
+            "environmental conditions, notable patterns, and provide actionable insights. "
+            "Include interpretation of the statistics, what they mean for the ecosystem, "
+            "and any recommendations. Provide a thorough analysis in 3-4 paragraphs."
+        )
+        max_tokens = 500
+    
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
+            "X-Title": os.environ.get("OPENROUTER_APP_TITLE", "GeoLLM NDVI Analyzer"),
+        }
+        
+        payload = {
+            "model": MODEL_INTENT,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ],
+            "temperature": 0.3,
+            "max_tokens": max_tokens
+        }
+        
+        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        
+        # For summary mode, extract only the summary part
+        if mode == "summary" and "SUMMARY:" in content:
+            summary_part = content.split("SUMMARY:")[-1].strip()
+            return summary_part if summary_part else content
+        
+        return content if content else ""
+        
+    except Exception as e:
+        print(f"⚠️ LLM analysis failed: {e}")
+        return ""
+
+
+def _call_http_service(analysis_type: str, roi_geometry: Dict[str, Any], scale: int) -> Dict[str, Any]:
+    """Call HTTP service for LULC or other analysis types."""
+    import requests
+    
+    try:
+        if analysis_type == "lulc":
+            service_url = "http://localhost:8000/lulc/dynamic-world"
+            payload = {
+                "geometry": roi_geometry,
+                "startDate": "2023-01-01", 
+                "endDate": "2023-12-31",
+                "confidenceThreshold": 0.5,
+                "scale": scale,
+                "maxPixels": 1e9,
+                "exactComputation": False,
+                "includeMedianVis": False
+            }
+        else:
+            # Default fallback
+            service_url = "http://localhost:8000/lulc/dynamic-world"
+            payload = {
+                "geometry": roi_geometry,
+                "startDate": "2023-01-01",
+                "endDate": "2023-12-31",
+                "confidenceThreshold": 0.5,
+                "scale": scale,
+                "maxPixels": 1e9,
+                "exactComputation": False,
+                "includeMedianVis": False
+            }
+        
+        response = requests.post(service_url, json=payload, timeout=120)
+        response.raise_for_status()
+        return response.json()
+        
+    except Exception as e:
+        print(f"❌ HTTP service call failed: {e}")
+        return {
+            "success": False,
+            "error": f"HTTP service failed: {str(e)}",
+            "error_type": "service_unavailable"
+        }
 
 
 def rag_tool_node(state: AgentState) -> Dict[str, Any]:
