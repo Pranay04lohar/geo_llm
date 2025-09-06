@@ -779,21 +779,34 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         service_result = {}
         
         if analysis_type == "ndvi" and NDVI_SERVICE_AVAILABLE:
-            # Use NDVIService directly for better integration
-            print("📡 Using direct NDVIService integration")
+            # Use NDVIService directly for better integration with polygon geometry
+            print("📡 Using direct NDVIService integration with polygon geometry")
             try:
-                # Optimize parameters for faster processing
-                # Reduce time range for faster processing
-                service_result = NDVIService.analyze_ndvi(
-                    geometry=roi_geometry,
-                    start_date="2023-06-01",  # Shorter time range
-                    end_date="2023-08-31",    # 3 months instead of 12
-                    cloud_threshold=30,       # Higher threshold for more images
-                    scale=max(scale, 30),     # Ensure minimum scale for speed
-                    max_pixels=5e8,           # Reduce max pixels by half
-                    include_time_series=False, # Disable time-series for speed
-                    exact_computation=False
-                )
+                # Check if we have polygon geometry data from Search API
+                if roi_info and roi_info.get("polygon_geometry"):
+                    print("🎯 Using polygon-based NDVI analysis")
+                    service_result = NDVIService.analyze_ndvi_with_polygon(
+                        roi_data=roi_info,
+                        start_date="2023-06-01",  # Shorter time range
+                        end_date="2023-08-31",    # 3 months instead of 12
+                        cloud_threshold=30,       # Higher threshold for more images
+                        scale=max(scale, 30),     # Ensure minimum scale for speed
+                        max_pixels=5e8,           # Reduce max pixels by half
+                        include_time_series=False, # Disable time-series for speed
+                        exact_computation=False
+                    )
+                else:
+                    print("⚠️ Using fallback geometry-based NDVI analysis")
+                    service_result = NDVIService.analyze_ndvi(
+                        geometry=roi_geometry,
+                        start_date="2023-06-01",  # Shorter time range
+                        end_date="2023-08-31",    # 3 months instead of 12
+                        cloud_threshold=30,       # Higher threshold for more images
+                        scale=max(scale, 30),     # Ensure minimum scale for speed
+                        max_pixels=5e8,           # Reduce max pixels by half
+                        include_time_series=False, # Disable time-series for speed
+                        exact_computation=False
+                    )
                 
                 if not service_result.get("success", False):
                     # Handle NDVI service errors

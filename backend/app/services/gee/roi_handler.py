@@ -116,14 +116,29 @@ class ROIHandler:
         if not location_name:
             return None
             
+        # Get location type first
+        location_type = primary_location.get("type", "city").lower()
+        
         # Try to get location data from Search API Service first
         search_data = self._get_location_from_search_api(location_name, location_type)
         
         if search_data:
-            # Use Search API Service data
+            # Use Search API Service data with polygon geometry
             lat, lng = search_data["lat"], search_data["lng"]
             area_km2 = search_data.get("area_km2")
+            polygon_geometry = search_data.get("polygon_geometry")
+            geometry_tiles = search_data.get("geometry_tiles", [])
+            bounding_box = search_data.get("bounding_box")
+            is_tiled = search_data.get("is_tiled", False)
+            is_fallback = search_data.get("is_fallback", False)
+            
             print(f"✅ Using Search API data for {location_name}: {lat:.4f}°N, {lng:.4f}°E, {area_km2} km²")
+            if polygon_geometry:
+                print(f"🎯 Using polygon geometry (tiled: {is_tiled}, fallback: {is_fallback})")
+                print(f"   📦 Polygon type: {polygon_geometry.get('type', 'unknown')}")
+                print(f"   📍 Coordinates count: {len(polygon_geometry.get('coordinates', [[]])[0]) if polygon_geometry else 0}")
+            else:
+                print(f"⚠️ No polygon geometry available, using fallback approach")
         else:
             # Fallback to geocoding
             coords = self._geocode_location(location_name)
@@ -131,25 +146,34 @@ class ROIHandler:
                 return None
             lat, lng = coords
             area_km2 = None
+            polygon_geometry = None
+            geometry_tiles = []
+            bounding_box = None
+            is_tiled = False
+            is_fallback = True
             print(f"⚠️ Using fallback geocoding for {location_name}: {lat:.4f}°N, {lng:.4f}°E")
         
         # Get dynamic ROI dimensions based on city characteristics
-        location_type = primary_location.get("type", "city").lower()
         
-        # Use Search API area data if available, otherwise use hardcoded dimensions
-        if search_data and area_km2:
-            # Calculate dimensions from Search API area data
-            # Assume roughly square area for simplicity
-            side_length = (area_km2 ** 0.5) * 1.2  # Add 20% buffer
-            dimensions = {"width": side_length, "height": side_length}
-            print(f"📊 Using Search API area data: {area_km2} km² → {side_length:.1f}km x {side_length:.1f}km")
+        # Use polygon geometry if available, otherwise create from dimensions
+        if search_data and polygon_geometry and not is_fallback:
+            # Use actual polygon geometry from Search API
+            roi_geometry = polygon_geometry
+            print(f"🎯 Using actual polygon geometry from Search API")
         else:
-            # Fallback to hardcoded dimensions
-            dimensions = self._get_dynamic_roi_size(location_type, location_name)
-            print(f"📐 Using hardcoded dimensions: {dimensions['width']}km x {dimensions['height']}km")
-        
-        # Create ROI geometry with dynamic dimensions
-        roi_geometry = self._create_dynamic_geometry(lat, lng, dimensions)
+            # Fallback to calculated dimensions
+            if search_data and area_km2:
+                # Calculate dimensions from Search API area data
+                side_length = (area_km2 ** 0.5) * 1.2  # Add 20% buffer
+                dimensions = {"width": side_length, "height": side_length}
+                print(f"📊 Using Search API area data: {area_km2} km² → {side_length:.1f}km x {side_length:.1f}km")
+            else:
+                # Fallback to hardcoded dimensions
+                dimensions = self._get_dynamic_roi_size(location_type, location_name)
+                print(f"📐 Using hardcoded dimensions: {dimensions['width']}km x {dimensions['height']}km")
+            
+            # Create ROI geometry with dynamic dimensions
+            roi_geometry = self._create_dynamic_geometry(lat, lng, dimensions)
         
         return {
             "source": "llm_locations",
@@ -161,9 +185,14 @@ class ROIHandler:
                 "confidence": primary_location.get("confidence", 0)
             },
             "all_locations": locations,
-            "buffer_km": max(dimensions["width"], dimensions["height"]) / 2,  # Equivalent radius for compatibility
-            "dimensions": dimensions,  # Add actual dimensions used
+            "buffer_km": max(dimensions.get("width", 30), dimensions.get("height", 25)) / 2 if 'dimensions' in locals() else 15,  # Equivalent radius for compatibility
+            "dimensions": dimensions if 'dimensions' in locals() else {"width": 30, "height": 25},  # Add actual dimensions used
             "geometry": roi_geometry,
+            "polygon_geometry": polygon_geometry,  # Main polygon geometry
+            "geometry_tiles": geometry_tiles,  # Tiled geometry for large areas
+            "bounding_box": bounding_box,  # Bounding box for GEE filtering
+            "is_tiled": is_tiled,  # Whether geometry was tiled
+            "is_fallback": is_fallback,  # Whether using fallback geometry
             "search_api_data": search_data,  # Include Search API data for reference
             "area_km2": area_km2  # Include area data
         }
@@ -265,14 +294,14 @@ class ROIHandler:
         
     def _get_location_from_search_api(self, location_name: str, location_type: str = "city") -> Optional[Dict[str, Any]]:
         """
-        Get accurate location data from Search API Service.
+        Get accurate location data from Search API Service with polygon geometry.
         
         Args:
             location_name: Name of the location
             location_type: Type of location (city, state, etc.)
             
         Returns:
-            Dict with coordinates, area, and other location data, or None if failed
+            Dict with coordinates, area, polygon geometry, and other location data, or None if failed
         """
         try:
             response = requests.post(
@@ -289,12 +318,22 @@ class ROIHandler:
                 if data.get("success", False):
                     coords = data.get("coordinates", {})
                     area = data.get("area_km2")
+                    polygon_geometry = data.get("polygon_geometry")
+                    geometry_tiles = data.get("geometry_tiles", [])
+                    bounding_box = data.get("bounding_box")
+                    is_tiled = data.get("is_tiled", False)
+                    is_fallback = data.get("is_fallback", False)
                     
                     if coords.get("lat") and coords.get("lng"):
                         return {
                             "lat": coords["lat"],
                             "lng": coords["lng"],
                             "area_km2": area,
+                            "polygon_geometry": polygon_geometry,
+                            "geometry_tiles": geometry_tiles,
+                            "bounding_box": bounding_box,
+                            "is_tiled": is_tiled,
+                            "is_fallback": is_fallback,
                             "source": "search_api"
                         }
                         

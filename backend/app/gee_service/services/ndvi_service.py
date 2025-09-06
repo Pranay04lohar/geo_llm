@@ -408,6 +408,419 @@ class NDVIService:
         }
     
     @staticmethod
+    def analyze_ndvi_with_polygon(
+        roi_data: Dict[str, Any],
+        start_date: str = "2023-01-01",
+        end_date: str = "2023-12-31",
+        cloud_threshold: int = 20,
+        scale: int = 30,
+        max_pixels: int = 1e13,
+        include_time_series: bool = True,
+        exact_computation: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Enhanced NDVI analysis using polygon geometry with tiling support.
+        
+        Args:
+            roi_data: ROI data from ROI handler with polygon geometry
+            start_date: Start date for analysis (YYYY-MM-DD)
+            end_date: End date for analysis (YYYY-MM-DD)
+            cloud_threshold: Maximum cloud cover percentage (0-100)
+            scale: Analysis scale in meters
+            max_pixels: Maximum pixels for computation
+            include_time_series: Whether to compute time-series statistics
+            exact_computation: If True, disable bestEffort for precise results
+        
+        Returns:
+            Dict with NDVI analysis results, tile URLs, and time-series data
+        """
+        start_time = time.time()
+        
+        try:
+            # Extract geometry information
+            polygon_geometry = roi_data.get("polygon_geometry")
+            geometry_tiles = roi_data.get("geometry_tiles", [])
+            bounding_box = roi_data.get("bounding_box")
+            is_tiled = roi_data.get("is_tiled", False)
+            is_fallback = roi_data.get("is_fallback", False)
+            
+            # Use polygon geometry if available, otherwise fall back to regular geometry
+            if polygon_geometry and not is_fallback:
+                logger.info(f"🎯 Using polygon geometry for precise analysis (tiled: {is_tiled})")
+                return NDVIService._analyze_with_polygon_geometry(
+                    polygon_geometry, geometry_tiles, bounding_box, is_tiled,
+                    start_date, end_date, cloud_threshold, scale, max_pixels,
+                    include_time_series, exact_computation
+                )
+            else:
+                # Fallback to regular geometry analysis
+                logger.info(f"⚠️ Using fallback geometry analysis")
+                geometry = roi_data.get("geometry", polygon_geometry)
+                return NDVIService.analyze_ndvi(
+                    geometry, start_date, end_date, cloud_threshold,
+                    scale, max_pixels, include_time_series, exact_computation
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in polygon-based NDVI analysis: {e}")
+            # Fallback to regular analysis
+            geometry = roi_data.get("geometry", roi_data.get("polygon_geometry"))
+            return NDVIService.analyze_ndvi(
+                geometry, start_date, end_date, cloud_threshold,
+                scale, max_pixels, include_time_series, exact_computation
+            )
+    
+    @staticmethod
+    def _analyze_with_polygon_geometry(
+        polygon_geometry: Dict[str, Any],
+        geometry_tiles: List[Dict[str, Any]],
+        bounding_box: Dict[str, float],
+        is_tiled: bool,
+        start_date: str,
+        end_date: str,
+        cloud_threshold: int,
+        scale: int,
+        max_pixels: int,
+        include_time_series: bool,
+        exact_computation: bool
+    ) -> Dict[str, Any]:
+        """
+        Analyze NDVI using polygon geometry with optional tiling.
+        
+        This method implements the hybrid approach:
+        1. Use bounding box for fast filtering (filterBounds)
+        2. Use polygon geometry for precise analysis (reduceRegion)
+        3. If tiled, process each tile and merge results
+        """
+        try:
+            # Convert geometries to EE geometries
+            ee_polygon = ee.Geometry(polygon_geometry)
+            
+            # Create bounding box for filtering if available
+            if bounding_box:
+                bbox_geometry = ee.Geometry.Rectangle([
+                    bounding_box["west"], bounding_box["south"],
+                    bounding_box["east"], bounding_box["north"]
+                ])
+                filter_geometry = bbox_geometry
+                logger.info(f"🎯 Using bounding box for filtering: {bounding_box}")
+            else:
+                filter_geometry = ee_polygon
+                logger.info("🎯 Using polygon geometry for filtering")
+            
+            # Load Sentinel-2 collection with bounding box filtering
+            logger.info(f"Loading Sentinel-2 data for period {start_date} to {end_date}")
+            s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                .filterBounds(filter_geometry) \
+                .filterDate(start_date, end_date) \
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_threshold))
+            
+            collection_size = s2_collection.size().getInfo()
+            logger.info(f"Found {collection_size} Sentinel-2 images")
+            
+            if collection_size == 0:
+                return {
+                    "error": f"No Sentinel-2 images found for the specified criteria",
+                    "error_type": "no_data",
+                    "success": False
+                }
+            
+            # Cloud masking and NDVI computation
+            def mask_s2_clouds(image):
+                qa = image.select('QA60')
+                cloud_bit_mask = 1 << 10
+                cirrus_bit_mask = 1 << 11
+                mask = qa.bitwiseAnd(cloud_bit_mask).eq(0) \
+                    .And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+                return image.updateMask(mask).divide(10000)
+            
+            def add_ndvi(image):
+                ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+                return image.addBands(ndvi)
+            
+            processed_collection = s2_collection.map(mask_s2_clouds).map(add_ndvi)
+            
+            if is_tiled and geometry_tiles:
+                # Process tiled geometry
+                logger.info(f"🔄 Processing {len(geometry_tiles)} tiles...")
+                return NDVIService._analyze_tiled_geometry(
+                    processed_collection, geometry_tiles, polygon_geometry,
+                    start_date, end_date, scale, max_pixels,
+                    include_time_series, exact_computation
+                )
+            else:
+                # Process single polygon geometry
+                logger.info("🎯 Processing single polygon geometry...")
+                return NDVIService._analyze_single_polygon(
+                    processed_collection, ee_polygon, polygon_geometry,
+                    start_date, end_date, scale, max_pixels,
+                    include_time_series, exact_computation
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in polygon geometry analysis: {e}")
+            raise e
+    
+    @staticmethod
+    def _analyze_single_polygon(
+        processed_collection: ee.ImageCollection,
+        ee_polygon: ee.Geometry,
+        polygon_geometry: Dict[str, Any],
+        start_date: str,
+        end_date: str,
+        scale: int,
+        max_pixels: int,
+        include_time_series: bool,
+        exact_computation: bool
+    ) -> Dict[str, Any]:
+        """Analyze NDVI for a single polygon geometry."""
+        try:
+            # Get median NDVI clipped to polygon
+            median_ndvi = processed_collection.select('NDVI').median().clip(ee_polygon)
+            
+            # Calculate polygon area
+            polygon_area_m2 = ee_polygon.area(maxError=1000).getInfo()
+            polygon_area_km2 = polygon_area_m2 / 1_000_000
+            
+            logger.info(f"Polygon area: {polygon_area_km2:.2f} km²")
+            
+            # Compute NDVI histogram using polygon geometry
+            histogram_data = NDVIService._compute_ndvi_histogram(
+                median_ndvi, ee_polygon, scale,
+                max_pixels if exact_computation else int(max_pixels),
+                polygon_area_km2
+            )
+            
+            # Process results similar to regular analyze_ndvi method
+            histogram = histogram_data["histogram"]
+            vegetation_stats = NDVIService._analyze_vegetation_distribution(histogram)
+            
+            # Compute NDVI statistics using polygon geometry
+            ndvi_stats = median_ndvi.reduceRegion(
+                reducer=ee.Reducer.mean().combine(
+                    ee.Reducer.minMax(), '', True
+                ).combine(ee.Reducer.stdDev(), '', True),
+                geometry=ee_polygon,  # Use polygon for precise reduction
+                scale=scale,
+                maxPixels=max_pixels if exact_computation else int(max_pixels),
+                bestEffort=not exact_computation
+            ).getInfo()
+            
+            # Generate tile URLs for visualization
+            # Generate tile URLs for visualization
+            vis_params = {
+                'min': -0.2,
+                'max': 0.8,
+                'palette': NDVIService.NDVI_PALETTE
+            }
+            map_id = median_ndvi.getMapId(vis_params)
+            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            tile_urls = {"urlFormat": tile_url}
+            
+            # Time series analysis if requested
+            time_series_data = {}
+            if include_time_series:
+                time_series_data = NDVIService._compute_time_series(
+                    processed_collection, ee_polygon, scale, start_date, end_date
+                )
+            
+            return {
+                "success": True,
+                "analysis_type": "polygon_geometry",
+                "geometry_type": "single_polygon",
+                "area_km2": polygon_area_km2,
+                "ndvi_stats": ndvi_stats,
+                "vegetation_distribution": vegetation_stats,
+                "histogram": histogram,
+                "tile_urls": tile_urls,
+                "time_series": time_series_data,
+                "metadata": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "scale_meters": scale,
+                    "max_pixels": max_pixels,
+                    "exact_computation": exact_computation,
+                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in single polygon analysis: {e}")
+            raise e
+    
+    @staticmethod
+    def _analyze_tiled_geometry(
+        processed_collection: ee.ImageCollection,
+        geometry_tiles: List[Dict[str, Any]],
+        polygon_geometry: Dict[str, Any],
+        start_date: str,
+        end_date: str,
+        scale: int,
+        max_pixels: int,
+        include_time_series: bool,
+        exact_computation: bool
+    ) -> Dict[str, Any]:
+        """Analyze NDVI for tiled geometry by processing each tile and merging results."""
+        try:
+            tile_results = []
+            total_area_km2 = 0
+            
+            logger.info(f"Processing {len(geometry_tiles)} tiles...")
+            
+            for i, tile_geometry in enumerate(geometry_tiles):
+                logger.info(f"Processing tile {i+1}/{len(geometry_tiles)}...")
+                
+                try:
+                    # Convert tile to EE geometry
+                    ee_tile = ee.Geometry(tile_geometry)
+                    
+                    # Calculate tile area
+                    tile_area_m2 = ee_tile.area(maxError=1000).getInfo()
+                    tile_area_km2 = tile_area_m2 / 1_000_000
+                    total_area_km2 += tile_area_km2
+                    
+                    # Get median NDVI for this tile
+                    median_ndvi = processed_collection.select('NDVI').median().clip(ee_tile)
+                    
+                    # Compute NDVI statistics for this tile
+                    tile_stats = median_ndvi.reduceRegion(
+                        reducer=ee.Reducer.mean().combine(
+                            ee.Reducer.minMax(), '', True
+                        ).combine(ee.Reducer.stdDev(), '', True),
+                        geometry=ee_tile,
+                        scale=scale,
+                        maxPixels=max_pixels // len(geometry_tiles),  # Distribute max_pixels across tiles
+                        bestEffort=not exact_computation
+                    ).getInfo()
+                    
+                    # Compute histogram for this tile
+                    histogram_data = NDVIService._compute_ndvi_histogram(
+                        median_ndvi, ee_tile, scale,
+                        max_pixels // len(geometry_tiles),
+                        tile_area_km2
+                    )
+                    
+                    tile_results.append({
+                        "tile_index": i,
+                        "area_km2": tile_area_km2,
+                        "ndvi_stats": tile_stats,
+                        "histogram": histogram_data["histogram"],
+                        "vegetation_distribution": NDVIService._analyze_vegetation_distribution(
+                            histogram_data["histogram"]
+                        )
+                    })
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing tile {i+1}: {e}")
+                    continue
+            
+            if not tile_results:
+                raise Exception("No tiles could be processed successfully")
+            
+            # Merge tile results
+            merged_stats = NDVIService._merge_tile_results(tile_results, total_area_km2)
+            
+            # Generate tile URLs for the full polygon
+            ee_polygon = ee.Geometry(polygon_geometry)
+            median_ndvi_full = processed_collection.select('NDVI').median().clip(ee_polygon)
+            # Generate tile URLs for the full polygon
+            vis_params = {
+                'min': -0.2,
+                'max': 0.8,
+                'palette': NDVIService.NDVI_PALETTE
+            }
+            map_id = median_ndvi_full.getMapId(vis_params)
+            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            tile_urls = {"urlFormat": tile_url}
+            
+            # Time series analysis if requested (using full polygon)
+            time_series_data = {}
+            if include_time_series:
+                time_series_data = NDVIService._compute_time_series(
+                    processed_collection, ee_polygon, scale, start_date, end_date
+                )
+            
+            return {
+                "success": True,
+                "analysis_type": "polygon_geometry",
+                "geometry_type": "tiled_polygon",
+                "tiles_processed": len(tile_results),
+                "total_tiles": len(geometry_tiles),
+                "area_km2": total_area_km2,
+                "merged_stats": merged_stats,
+                "tile_results": tile_results,
+                "tile_urls": tile_urls,
+                "time_series": time_series_data,
+                "metadata": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "scale_meters": scale,
+                    "max_pixels": max_pixels,
+                    "exact_computation": exact_computation,
+                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in tiled geometry analysis: {e}")
+            raise e
+    
+    @staticmethod
+    def _merge_tile_results(tile_results: List[Dict[str, Any]], total_area_km2: float) -> Dict[str, Any]:
+        """Merge results from multiple tiles into overall statistics."""
+        try:
+            # Initialize merged statistics
+            merged_ndvi_stats = {
+                "NDVI_mean": 0.0,
+                "NDVI_min": float('inf'),
+                "NDVI_max": float('-inf'),
+                "NDVI_stdDev": 0.0
+            }
+            
+            merged_vegetation = {
+                "water_percentage": 0.0,
+                "bare_soil_percentage": 0.0,
+                "sparse_vegetation_percentage": 0.0,
+                "moderate_vegetation_percentage": 0.0,
+                "dense_vegetation_percentage": 0.0
+            }
+            
+            # Area-weighted merging
+            for tile in tile_results:
+                tile_area = tile["area_km2"]
+                weight = tile_area / total_area_km2
+                
+                # Merge NDVI statistics
+                ndvi_stats = tile["ndvi_stats"]
+                if "NDVI_mean" in ndvi_stats:
+                    merged_ndvi_stats["NDVI_mean"] += ndvi_stats["NDVI_mean"] * weight
+                    merged_ndvi_stats["NDVI_min"] = min(merged_ndvi_stats["NDVI_min"], ndvi_stats.get("NDVI_min", 0))
+                    merged_ndvi_stats["NDVI_max"] = max(merged_ndvi_stats["NDVI_max"], ndvi_stats.get("NDVI_max", 0))
+                
+                # Merge vegetation distribution
+                veg_dist = tile["vegetation_distribution"]
+                for key in merged_vegetation:
+                    if key in veg_dist:
+                        merged_vegetation[key] += veg_dist[key] * weight
+            
+            return {
+                "ndvi_stats": merged_ndvi_stats,
+                "vegetation_distribution": merged_vegetation
+            }
+            
+        except Exception as e:
+            logger.error(f"Error merging tile results: {e}")
+            return {
+                "ndvi_stats": {"NDVI_mean": 0.0, "NDVI_min": 0.0, "NDVI_max": 0.0, "NDVI_stdDev": 0.0},
+                "vegetation_distribution": {
+                    "water_percentage": 0.0,
+                    "bare_soil_percentage": 0.0,
+                    "sparse_vegetation_percentage": 0.0,
+                    "moderate_vegetation_percentage": 0.0,
+                    "dense_vegetation_percentage": 0.0
+                }
+            }
+    
     def analyze_ndvi(
         geometry: Dict[str, Any],
         start_date: str = "2023-01-01",
