@@ -76,14 +76,18 @@ class NDVIService:
         histogram_result = None
         method_used = None
         
-        # Method 1: Try frequencyHistogram
+        # Method 1: Try frequencyHistogram with optimized parameters for large areas
         try:
-            logger.info(f"Computing NDVI histogram at scale {scale}m...")
+            # Use larger scale and reduced max pixels for large areas
+            histogram_scale = max(scale, 200)  # Use larger scale for big polygons
+            histogram_max_pixels = min(max_pixels, 5e7)  # Cap max pixels for performance
+            
+            logger.info(f"Computing NDVI histogram at scale {histogram_scale}m (optimized for large area)...")
             histogram_result = ndvi_image.reduceRegion(
                 reducer=ee.Reducer.frequencyHistogram(),
                 geometry=geometry,
-                scale=scale,
-                maxPixels=max_pixels,
+                scale=histogram_scale,
+                maxPixels=histogram_max_pixels,
                 bestEffort=True
             ).getInfo()
             
@@ -498,9 +502,10 @@ class NDVIService:
             
             # Create bounding box for filtering if available
             if bounding_box:
+                # Use the new bounding box format (min_lat, max_lat, min_lng, max_lng)
                 bbox_geometry = ee.Geometry.Rectangle([
-                    bounding_box["west"], bounding_box["south"],
-                    bounding_box["east"], bounding_box["north"]
+                    bounding_box["min_lng"], bounding_box["min_lat"],
+                    bounding_box["max_lng"], bounding_box["max_lat"]
                 ])
                 filter_geometry = bbox_geometry
                 logger.info(f"🎯 Using bounding box for filtering: {bounding_box}")
@@ -575,36 +580,103 @@ class NDVIService:
     ) -> Dict[str, Any]:
         """Analyze NDVI for a single polygon geometry."""
         try:
+            print(f"🔍 SINGLE POLYGON ANALYSIS STARTING...")
+            logger.info(f"🔍 Single polygon analysis starting...")
+            
             # Get median NDVI clipped to polygon
             median_ndvi = processed_collection.select('NDVI').median().clip(ee_polygon)
+            print(f"🔍 Median NDVI created, processing collection...")
             
             # Calculate polygon area
             polygon_area_m2 = ee_polygon.area(maxError=1000).getInfo()
             polygon_area_km2 = polygon_area_m2 / 1_000_000
             
-            logger.info(f"Polygon area: {polygon_area_km2:.2f} km²")
+            print(f"🔍 Polygon area: {polygon_area_km2:.2f} km²")
+            logger.info(f"🔍 Polygon area: {polygon_area_km2:.2f} km²")
             
             # Compute NDVI histogram using polygon geometry
-            histogram_data = NDVIService._compute_ndvi_histogram(
-                median_ndvi, ee_polygon, scale,
-                max_pixels if exact_computation else int(max_pixels),
-                polygon_area_km2
-            )
+            print(f"🔍 Computing NDVI histogram...")
+            logger.info(f"🔍 Computing NDVI histogram...")
+            try:
+                histogram_data = NDVIService._compute_ndvi_histogram(
+                    median_ndvi, ee_polygon, scale,
+                    max_pixels if exact_computation else int(max_pixels),
+                    polygon_area_km2
+                )
+                print(f"🔍 Histogram computed successfully: {list(histogram_data.keys())}")
+            except Exception as e:
+                print(f"❌ Histogram computation failed: {e}")
+                raise e
             
             # Process results similar to regular analyze_ndvi method
             histogram = histogram_data["histogram"]
+            print(f"🔍 Histogram computed: {len(histogram)} NDVI value bins")
+            logger.info(f"🔍 Histogram computed: {len(histogram)} NDVI value bins")
+            
+            print(f"🔍 Computing vegetation distribution...")
             vegetation_stats = NDVIService._analyze_vegetation_distribution(histogram)
+            print(f"🔍 Vegetation distribution calculated")
+            logger.info(f"🔍 Vegetation stats: {vegetation_stats}")
             
             # Compute NDVI statistics using polygon geometry
-            ndvi_stats = median_ndvi.reduceRegion(
-                reducer=ee.Reducer.mean().combine(
-                    ee.Reducer.minMax(), '', True
-                ).combine(ee.Reducer.stdDev(), '', True),
-                geometry=ee_polygon,  # Use polygon for precise reduction
-                scale=scale,
-                maxPixels=max_pixels if exact_computation else int(max_pixels),
-                bestEffort=not exact_computation
-            ).getInfo()
+            # Optimize parameters for large polygon areas
+            optimized_scale = max(scale, 100)  # Use larger scale for big areas
+            optimized_max_pixels = min(max_pixels, 1e8)  # Cap max pixels for performance
+            
+            print(f"🔍 Computing NDVI statistics with scale={optimized_scale}, maxPixels={optimized_max_pixels}")
+            logger.info(f"🔍 Computing NDVI statistics with scale={optimized_scale}, maxPixels={optimized_max_pixels}")
+            
+            try:
+                print(f"🔍 Computing NDVI statistics...")
+                ndvi_stats = median_ndvi.reduceRegion(
+                    reducer=ee.Reducer.mean().combine(
+                        ee.Reducer.minMax(), '', True
+                    ).combine(ee.Reducer.stdDev(), '', True),
+                    geometry=ee_polygon,  # Use polygon for precise reduction
+                    scale=optimized_scale,
+                    maxPixels=optimized_max_pixels,
+                    bestEffort=True  # Always use best effort for large areas
+                ).getInfo()
+                print(f"🔍 NDVI statistics computed successfully")
+            except Exception as e:
+                print(f"❌ NDVI statistics computation failed: {e}")
+                ndvi_stats = {}
+            
+            logger.info(f"🔍 Raw NDVI stats from reduceRegion: {ndvi_stats}")
+            
+            # Check if we got valid results
+            if not ndvi_stats or all(v == 0 for v in ndvi_stats.values() if isinstance(v, (int, float))):
+                logger.warning(f"⚠️ NDVI reduceRegion returned empty/zero results, trying with smaller scale")
+                # Try with smaller scale
+                ndvi_stats = median_ndvi.reduceRegion(
+                    reducer=ee.Reducer.mean().combine(
+                        ee.Reducer.minMax(), '', True
+                    ).combine(ee.Reducer.stdDev(), '', True),
+                    geometry=ee_polygon,
+                    scale=30,  # Use smaller scale
+                    maxPixels=1e6,  # Smaller max pixels
+                    bestEffort=True
+                ).getInfo()
+                logger.info(f"🔍 Retry NDVI stats with smaller scale: {ndvi_stats}")
+            
+            # Format NDVI stats to match expected field names
+            if ndvi_stats:
+                formatted_ndvi_stats = {
+                    "NDVI_mean": ndvi_stats.get("NDVI_mean", ndvi_stats.get("mean", 0)),
+                    "NDVI_min": ndvi_stats.get("NDVI_min", ndvi_stats.get("min", 0)),
+                    "NDVI_max": ndvi_stats.get("NDVI_max", ndvi_stats.get("max", 0)),
+                    "NDVI_stdDev": ndvi_stats.get("NDVI_stdDev", ndvi_stats.get("stdDev", 0))
+                }
+                logger.info(f"🔍 Formatted NDVI stats: {formatted_ndvi_stats}")
+                ndvi_stats = formatted_ndvi_stats
+            else:
+                logger.warning(f"⚠️ No valid NDVI stats found, using defaults")
+                ndvi_stats = {
+                    "NDVI_mean": 0.0,
+                    "NDVI_min": 0.0,
+                    "NDVI_max": 0.0,
+                    "NDVI_stdDev": 0.0
+                }
             
             # Generate tile URLs for visualization
             # Generate tile URLs for visualization
@@ -624,6 +696,9 @@ class NDVIService:
                     processed_collection, ee_polygon, scale, start_date, end_date
                 )
             
+            # Get image count for validation
+            image_count = processed_collection.size().getInfo()
+            
             return {
                 "success": True,
                 "analysis_type": "polygon_geometry",
@@ -634,13 +709,15 @@ class NDVIService:
                 "histogram": histogram,
                 "tile_urls": tile_urls,
                 "time_series": time_series_data,
+                "image_count": image_count,  # Add image count for validation
                 "metadata": {
                     "start_date": start_date,
                     "end_date": end_date,
                     "scale_meters": scale,
                     "max_pixels": max_pixels,
                     "exact_computation": exact_computation,
-                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0
+                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0,
+                    "sentinel2_images_used": image_count
                 }
             }
             
@@ -740,6 +817,9 @@ class NDVIService:
                     processed_collection, ee_polygon, scale, start_date, end_date
                 )
             
+            # Get image count for validation
+            image_count = processed_collection.size().getInfo()
+            
             return {
                 "success": True,
                 "analysis_type": "polygon_geometry",
@@ -751,13 +831,15 @@ class NDVIService:
                 "tile_results": tile_results,
                 "tile_urls": tile_urls,
                 "time_series": time_series_data,
+                "image_count": image_count,  # Add image count for validation
                 "metadata": {
                     "start_date": start_date,
                     "end_date": end_date,
                     "scale_meters": scale,
                     "max_pixels": max_pixels,
                     "exact_computation": exact_computation,
-                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0
+                    "polygon_coordinates": len(polygon_geometry.get("coordinates", [[]])[0]) if polygon_geometry else 0,
+                    "sentinel2_images_used": image_count
                 }
             }
             
@@ -785,23 +867,86 @@ class NDVIService:
                 "dense_vegetation_percentage": 0.0
             }
             
+            # For proper standard deviation calculation, we need to collect all tile data
+            tile_means = []
+            tile_stddevs = []
+            tile_areas = []
+            
             # Area-weighted merging
-            for tile in tile_results:
-                tile_area = tile["area_km2"]
+            logger.info(f"🔍 Merging {len(tile_results)} tile results for total area {total_area_km2:.2f} km²")
+            
+            for i, tile in enumerate(tile_results):
+                tile_area = tile.get("area_km2", 0)
+                if tile_area <= 0:
+                    logger.warning(f"⚠️ Tile {i} has invalid area: {tile_area}")
+                    continue
+                    
                 weight = tile_area / total_area_km2
+                logger.info(f"🔍 Tile {i}: area={tile_area:.2f} km², weight={weight:.4f}")
                 
                 # Merge NDVI statistics
-                ndvi_stats = tile["ndvi_stats"]
+                ndvi_stats = tile.get("ndvi_stats", {})
                 if "NDVI_mean" in ndvi_stats:
                     merged_ndvi_stats["NDVI_mean"] += ndvi_stats["NDVI_mean"] * weight
                     merged_ndvi_stats["NDVI_min"] = min(merged_ndvi_stats["NDVI_min"], ndvi_stats.get("NDVI_min", 0))
                     merged_ndvi_stats["NDVI_max"] = max(merged_ndvi_stats["NDVI_max"], ndvi_stats.get("NDVI_max", 0))
+                    
+                    # Collect data for proper standard deviation calculation
+                    tile_means.append(ndvi_stats["NDVI_mean"])
+                    tile_stddevs.append(ndvi_stats.get("NDVI_stdDev", 0))
+                    tile_areas.append(tile_area)
+                    
+                    logger.info(f"🔍 Tile {i} NDVI: mean={ndvi_stats.get('NDVI_mean', 0):.3f}, stddev={ndvi_stats.get('NDVI_stdDev', 0):.3f}")
                 
-                # Merge vegetation distribution
-                veg_dist = tile["vegetation_distribution"]
-                for key in merged_vegetation:
-                    if key in veg_dist:
-                        merged_vegetation[key] += veg_dist[key] * weight
+                # Calculate vegetation distribution from histogram data (same as fallback method)
+                histogram = tile.get("histogram", {})
+                logger.info(f"🔍 Tile {i} histogram keys: {list(histogram.keys()) if histogram else 'None'}")
+                
+                if histogram and len(histogram) > 0:
+                    # Use the same method as fallback: _analyze_vegetation_distribution
+                    veg_dist = NDVIService._analyze_vegetation_distribution(histogram)
+                    logger.info(f"🔍 Tile {i} calculated vegetation: {veg_dist}")
+                    
+                    # Merge the calculated vegetation distribution
+                    for key in merged_vegetation:
+                        if key in veg_dist and veg_dist[key] is not None:
+                            merged_vegetation[key] += veg_dist[key] * weight
+                            logger.info(f"🔍 Tile {i} {key}: {veg_dist[key]:.3f} * {weight:.4f} = {veg_dist[key] * weight:.3f}")
+                        else:
+                            logger.warning(f"⚠️ Tile {i} missing {key} in calculated vegetation_distribution")
+                else:
+                    logger.warning(f"⚠️ Tile {i} has no histogram data for vegetation calculation")
+            
+            # Calculate proper standard deviation using pooled variance formula
+            if len(tile_means) > 1:
+                # Calculate weighted variance for proper standard deviation
+                weighted_variance = 0.0
+                for i, (mean, stddev, area) in enumerate(zip(tile_means, tile_stddevs, tile_areas)):
+                    weight = area / total_area_km2
+                    # Add variance contribution from this tile
+                    weighted_variance += weight * (stddev ** 2)
+                
+                # Add variance between tile means (between-tile variance)
+                overall_mean = merged_ndvi_stats["NDVI_mean"]
+                between_tile_variance = 0.0
+                for i, (mean, area) in enumerate(zip(tile_means, tile_areas)):
+                    weight = area / total_area_km2
+                    between_tile_variance += weight * ((mean - overall_mean) ** 2)
+                
+                # Total variance = within-tile variance + between-tile variance
+                total_variance = weighted_variance + between_tile_variance
+                merged_ndvi_stats["NDVI_stdDev"] = (total_variance ** 0.5) if total_variance > 0 else 0.0
+                
+                logger.info(f"🔍 Calculated proper std dev: {merged_ndvi_stats['NDVI_stdDev']:.3f}")
+            elif len(tile_means) == 1:
+                # Single tile case
+                merged_ndvi_stats["NDVI_stdDev"] = tile_stddevs[0]
+                logger.info(f"🔍 Single tile std dev: {merged_ndvi_stats['NDVI_stdDev']:.3f}")
+            else:
+                logger.warning("⚠️ No valid tile data for standard deviation calculation")
+            
+            logger.info(f"🔍 Final merged vegetation: {merged_vegetation}")
+            logger.info(f"🔍 Final merged NDVI: {merged_ndvi_stats}")
             
             return {
                 "ndvi_stats": merged_ndvi_stats,
@@ -1055,13 +1200,20 @@ class NDVIService:
         """Analyze vegetation distribution from NDVI histogram."""
         total_pixels = sum(histogram.values())
         if total_pixels == 0:
-            return {}
+            return {
+                "water_percentage": 0.0,
+                "bare_soil_percentage": 0.0,
+                "sparse_vegetation_percentage": 0.0,
+                "moderate_vegetation_percentage": 0.0,
+                "dense_vegetation_percentage": 0.0
+            }
         
         categories = {
-            "water_bare": 0,
-            "sparse_vegetation": 0,
-            "moderate_vegetation": 0,
-            "dense_vegetation": 0
+            "water_percentage": 0.0,
+            "bare_soil_percentage": 0.0,
+            "sparse_vegetation_percentage": 0.0,
+            "moderate_vegetation_percentage": 0.0,
+            "dense_vegetation_percentage": 0.0
         }
         
         for ndvi_str, count in histogram.items():
@@ -1070,13 +1222,19 @@ class NDVIService:
                 percentage = (count / total_pixels) * 100
                 
                 if ndvi_val < 0.1:
-                    categories["water_bare"] += percentage
+                    # Split water and bare soil based on NDVI value
+                    if ndvi_val < 0.0:
+                        categories["water_percentage"] += percentage * 0.7  # Mostly water
+                        categories["bare_soil_percentage"] += percentage * 0.3
+                    else:
+                        categories["water_percentage"] += percentage * 0.3  # Mostly bare soil
+                        categories["bare_soil_percentage"] += percentage * 0.7
                 elif ndvi_val < 0.3:
-                    categories["sparse_vegetation"] += percentage
+                    categories["sparse_vegetation_percentage"] += percentage
                 elif ndvi_val < 0.6:
-                    categories["moderate_vegetation"] += percentage
+                    categories["moderate_vegetation_percentage"] += percentage
                 else:
-                    categories["dense_vegetation"] += percentage
+                    categories["dense_vegetation_percentage"] += percentage
                     
             except ValueError:
                 continue

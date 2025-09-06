@@ -304,6 +304,7 @@ class ROIHandler:
             Dict with coordinates, area, polygon geometry, and other location data, or None if failed
         """
         try:
+            print(f"🔍 ROI Handler: Calling Search API for {location_name}")
             response = requests.post(
                 f"{self.search_api_url}/search/location-data",
                 json={
@@ -313,8 +314,11 @@ class ROIHandler:
                 timeout=15
             )
             
+            print(f"🔍 ROI Handler: Search API response status: {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
+                print(f"🔍 ROI Handler: Search API success: {data.get('success', False)}")
+                print(f"🔍 ROI Handler: Search API error: {data.get('error', 'None')}")
                 if data.get("success", False):
                     coords = data.get("coordinates", {})
                     area = data.get("area_km2")
@@ -324,7 +328,9 @@ class ROIHandler:
                     is_tiled = data.get("is_tiled", False)
                     is_fallback = data.get("is_fallback", False)
                     
+                    print(f"🔍 ROI Handler: Coordinates: {coords}")
                     if coords.get("lat") and coords.get("lng"):
+                        print(f"🔍 ROI Handler: Valid coordinates found, returning data")
                         return {
                             "lat": coords["lat"],
                             "lng": coords["lng"],
@@ -336,6 +342,8 @@ class ROIHandler:
                             "is_fallback": is_fallback,
                             "source": "search_api"
                         }
+                    else:
+                        print(f"🔍 ROI Handler: Invalid coordinates, returning None")
                         
         except Exception as e:
             print(f"⚠️ Search API request failed for {location_name}: {e}")

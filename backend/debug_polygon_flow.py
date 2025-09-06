@@ -54,7 +54,7 @@ def test_polygon_flow():
     try:
         from app.search_service.services.nominatim_client import NominatimClient
         nominatim_client = NominatimClient()
-        nominatim_data = nominatim_client.search_location("Bikaner")
+        nominatim_data = nominatim_client.search_location("Udaipur")
         
         debug_step("Nominatim Client Direct", nominatim_data, 
                   ['polygon_geometry', 'geometry_tiles', 'bounding_box', 'is_tiled', 'is_fallback'])
@@ -73,7 +73,7 @@ def test_polygon_flow():
         response = requests.post(
             "http://localhost:8001/search/location-data",
             json={
-                "location_name": "Bikaner",
+                "location_name": "Udaipur",
                 "location_type": "city"
             },
             timeout=15
@@ -99,7 +99,7 @@ def test_polygon_flow():
         
         # Create mock location data
         mock_locations = [{
-            "matched_name": "Bikaner",
+            "matched_name": "Udaipur",
             "type": "city",
             "confidence": 0.9
         }]
@@ -151,9 +151,9 @@ def test_polygon_flow():
         
         # Create mock state
         mock_state = {
-            "query": "Analyze vegetation in Bikaner",
+            "query": "Analyze vegetation in Udaipur",
             "locations": [{
-                "matched_name": "Bikaner",
+                "matched_name": "Udaipur",
                 "type": "city",
                 "confidence": 0.9
             }]

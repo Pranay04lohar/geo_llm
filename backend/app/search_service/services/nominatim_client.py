@@ -27,6 +27,40 @@ except ImportError as e:
 class NominatimClient:
     """Fixed Nominatim client with working area calculation."""
     
+    # Configuration for ambiguous city names
+    AMBIGUOUS_CITIES = {
+        'udaipur': {'preferred': 'rajasthan', 'avoid': 'himachal pradesh'},
+        'delhi': {'preferred': 'delhi', 'avoid': 'haryana'},
+        'bangalore': {'preferred': 'karnataka', 'avoid': 'tamil nadu'},
+        'mumbai': {'preferred': 'maharashtra', 'avoid': 'gujarat'},
+        'kolkata': {'preferred': 'west bengal', 'avoid': 'bihar'},
+        'chennai': {'preferred': 'tamil nadu', 'avoid': 'karnataka'},
+        'hyderabad': {'preferred': 'telangana', 'avoid': 'andhra pradesh'},
+        'pune': {'preferred': 'maharashtra', 'avoid': 'karnataka'},
+        'ahmedabad': {'preferred': 'gujarat', 'avoid': 'rajasthan'},
+        'jaipur': {'preferred': 'rajasthan', 'avoid': 'haryana'},
+        'lucknow': {'preferred': 'uttar pradesh', 'avoid': 'bihar'},
+        'kanpur': {'preferred': 'uttar pradesh', 'avoid': 'madhya pradesh'},
+        'nagpur': {'preferred': 'maharashtra', 'avoid': 'madhya pradesh'},
+        'indore': {'preferred': 'madhya pradesh', 'avoid': 'rajasthan'},
+        'bhopal': {'preferred': 'madhya pradesh', 'avoid': 'rajasthan'},
+        'visakhapatnam': {'preferred': 'andhra pradesh', 'avoid': 'telangana'},
+        'patna': {'preferred': 'bihar', 'avoid': 'jharkhand'},
+        'bhubaneswar': {'preferred': 'odisha', 'avoid': 'west bengal'},
+        'coimbatore': {'preferred': 'tamil nadu', 'avoid': 'karnataka'},
+        'kochi': {'preferred': 'kerala', 'avoid': 'karnataka'}
+    }
+    
+    MAJOR_STATES = [
+        'rajasthan', 'maharashtra', 'karnataka', 'tamil nadu', 'gujarat', 
+        'west bengal', 'uttar pradesh', 'delhi', 'haryana', 'punjab'
+    ]
+    
+    MINOR_STATES = [
+        'himachal pradesh', 'uttarakhand', 'jammu and kashmir', 'sikkim', 
+        'arunachal pradesh', 'manipur', 'mizoram', 'nagaland', 'tripura'
+    ]
+    
     def __init__(self):
         self.base_url = "https://nominatim.openstreetmap.org"
         self.headers = {
@@ -45,6 +79,20 @@ class NominatimClient:
             time.sleep(sleep_time)
         
         self.last_request_time = time.time()
+    
+    @classmethod
+    def add_ambiguous_city(cls, city_name: str, preferred_state: str, avoid_state: str):
+        """Add a new ambiguous city to the disambiguation rules."""
+        cls.AMBIGUOUS_CITIES[city_name.lower()] = {
+            'preferred': preferred_state.lower(),
+            'avoid': avoid_state.lower()
+        }
+        logger.info(f"Added ambiguous city rule: {city_name} -> prefer {preferred_state}, avoid {avoid_state}")
+    
+    @classmethod
+    def get_ambiguous_cities(cls) -> Dict[str, Dict[str, str]]:
+        """Get the current ambiguous cities configuration."""
+        return cls.AMBIGUOUS_CITIES.copy()
     
     def search_location(self, location_name: str, location_type: str = "city") -> Optional[Dict[str, Any]]:
         """
@@ -129,10 +177,75 @@ class NominatimClient:
         best_score = 0
         
         for result in results:
+            # Skip None results
+            if result is None:
+                logger.warning("Skipping None result in search results")
+                continue
+                
             score = 0
+            display_name = result.get('display_name', '').lower()
+            
+            # PRIORITY 0: Major city disambiguation (highest priority)
+            # Prioritize major cities over villages/towns with same name
+            result_type = result.get('type', '').lower()
+            result_class = result.get('class', '').lower()
+            address = result.get('address', {})
+            state = address.get('state', '').lower() if address else ''
+            
+            # Major city indicators (higher priority)
+            if result_type in ['city', 'administrative'] and result_class in ['place', 'boundary']:
+                score += 50  # Major cities get high priority
+                logger.info(f"Found major city: {result.get('display_name')} ({result_type})")
+            elif result_type in ['town', 'municipality']:
+                score += 30  # Towns get medium priority
+                logger.info(f"Found town: {result.get('display_name')} ({result_type})")
+            elif result_type in ['village', 'hamlet', 'neighbourhood']:
+                score -= 30  # Penalize villages/hamlets
+                logger.info(f"Found village/hamlet (penalized): {result.get('display_name')} ({result_type})")
+            
+            # State-based prioritization for common ambiguous cities
+            if state in self.MAJOR_STATES:
+                score += 20  # Bonus for major states
+                logger.info(f"Found in major state: {state}")
+            elif state in self.MINOR_STATES:
+                score -= 20  # Penalty for minor states
+                logger.info(f"Found in minor state (penalized): {state}")
+            
+            # Special handling for known ambiguous city names
+            city_name = location_name.lower().strip()
+            if city_name in self.AMBIGUOUS_CITIES:
+                preferred_state = self.AMBIGUOUS_CITIES[city_name]['preferred']
+                avoid_state = self.AMBIGUOUS_CITIES[city_name]['avoid']
+                
+                if preferred_state in state:
+                    score += 60  # High bonus for preferred state
+                    logger.info(f"Found {city_name} in preferred state: {state}")
+                elif avoid_state in state:
+                    score -= 60  # High penalty for avoided state
+                    logger.info(f"Found {city_name} in avoided state (penalized): {state}")
+            
+            # Population-based scoring if available
+            extratags = result.get('extratags', {})
+            if extratags:
+                population = extratags.get('population')
+                if population:
+                    try:
+                        pop_num = int(population.replace(',', ''))
+                        if pop_num > 1000000:  # > 1M population
+                            score += 40
+                            logger.info(f"Large city (pop: {population}): {result.get('display_name')}")
+                        elif pop_num > 100000:  # > 100K population
+                            score += 20
+                            logger.info(f"Medium city (pop: {population}): {result.get('display_name')}")
+                        elif pop_num < 10000:  # < 10K population
+                            score -= 40
+                            logger.info(f"Small settlement (pop: {population}): {result.get('display_name')}")
+                    except (ValueError, AttributeError):
+                        pass
             
             # PRIORITY 1: Results with polygon geometry (most important)
-            if 'geojson' in result and result['geojson'].get('type') in ['Polygon', 'MultiPolygon']:
+            geojson = result.get('geojson', {})
+            if geojson and geojson.get('type') in ['Polygon', 'MultiPolygon']:
                 score += 50  # Highest priority
                 logger.info(f"Found polygon geometry for: {result.get('display_name')}")
             
@@ -170,9 +283,9 @@ class NominatimClient:
                 score += 5
             
             # Check if bounding box size is reasonable
-            if 'boundingbox' in result:
+            bbox = result.get('boundingbox')
+            if bbox:
                 try:
-                    bbox = result['boundingbox']
                     area = self._estimate_bbox_area(bbox)
                     if 1 <= area <= 10000:  # Reasonable city size
                         score += 3

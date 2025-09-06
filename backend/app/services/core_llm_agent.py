@@ -129,7 +129,11 @@ except Exception:  # pragma: no cover
     StateGraph = _StateGraph  # type: ignore
 
 import requests
+import logging
 from dotenv import load_dotenv
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # --- Robust .env file loading ---
 # The .env file is located in the `backend` directory.
@@ -567,7 +571,7 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
     # Optimize: For GEE_Tool queries, run analysis once and reuse results
     tools_hint: List[str] = plan.get("tools_to_use", [])
     gee_result_cache = None  # Cache GEE results to avoid duplicate calls
-    
+
     for sub in subtasks:
         step = sub.get("step")
         task_text: str = sub.get("task", "")
@@ -714,11 +718,15 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             
             print(f"🌍 Creating ROI for location: {location_name} ({location_type})")
             
-            # Create ROI around the detected location
-            roi_info = roi_handler._create_roi_from_location(location_name, location_type)
+            # Use extract_roi_from_locations to get polygon geometry from Search API
+            roi_info = roi_handler.extract_roi_from_locations(locations)
             if roi_info:
                 roi_geometry = roi_info.get("geometry")
                 roi_source = f"llm_ner_{location_name}"
+                print(f"🎯 ROI Info contains polygon_geometry: {bool(roi_info.get('polygon_geometry'))}")
+                print(f"🎯 ROI Info contains geometry_tiles: {len(roi_info.get('geometry_tiles', []))}")
+                print(f"🎯 ROI Info is_tiled: {roi_info.get('is_tiled', False)}")
+                print(f"🎯 ROI Info is_fallback: {roi_info.get('is_fallback', False)}")
         
         if not roi_geometry:
             # Fallback: extract ROI from query text
@@ -785,16 +793,31 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 # Check if we have polygon geometry data from Search API
                 if roi_info and roi_info.get("polygon_geometry"):
                     print("🎯 Using polygon-based NDVI analysis")
-                    service_result = NDVIService.analyze_ndvi_with_polygon(
-                        roi_data=roi_info,
-                        start_date="2023-06-01",  # Shorter time range
-                        end_date="2023-08-31",    # 3 months instead of 12
-                        cloud_threshold=30,       # Higher threshold for more images
-                        scale=max(scale, 30),     # Ensure minimum scale for speed
-                        max_pixels=5e8,           # Reduce max pixels by half
-                        include_time_series=False, # Disable time-series for speed
-                        exact_computation=False
-                    )
+                    print(f"🔍 ROI data keys: {list(roi_info.keys())}")
+                    print(f"🔍 Polygon geometry type: {roi_info.get('polygon_geometry', {}).get('type', 'unknown')}")
+                    print(f"🔍 Geometry tiles count: {len(roi_info.get('geometry_tiles', []))}")
+                    print(f"🔍 Is tiled: {roi_info.get('is_tiled', False)}")
+                    print(f"🔍 Is fallback: {roi_info.get('is_fallback', False)}")
+                    
+                    try:
+                        service_result = NDVIService.analyze_ndvi_with_polygon(
+                            roi_data=roi_info,
+                            start_date="2023-06-01",  # Shorter time range
+                            end_date="2023-08-31",    # 3 months instead of 12
+                            cloud_threshold=30,       # Higher threshold for more images
+                            scale=max(scale, 30),     # Ensure minimum scale for speed
+                            max_pixels=5e8,           # Reduce max pixels by half
+                            include_time_series=False, # Disable time-series for speed
+                            exact_computation=False
+                        )
+                        print(f"🔍 NDVI service result keys: {list(service_result.keys()) if service_result else 'None'}")
+                        print(f"🔍 NDVI service success: {service_result.get('success', False) if service_result else 'None'}")
+                        print(f"🔍 NDVI service area: {service_result.get('area_km2', 'None') if service_result else 'None'}")
+                    except Exception as e:
+                        print(f"❌ NDVI service error: {e}")
+                        import traceback
+                        print(f"❌ Traceback: {traceback.format_exc()}")
+                        service_result = {"success": False, "error": str(e)}
                 else:
                     print("⚠️ Using fallback geometry-based NDVI analysis")
                     service_result = NDVIService.analyze_ndvi(
@@ -836,12 +859,34 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         
         # Step 4: Format results for the agent contract using enhanced metadata
         processing_time = service_result.get("processing_time_seconds", 0)
-        roi_area = service_result.get("roi_area_km2", 0)
+        
+        # Handle different area field names
+        if "area_km2" in service_result:
+            # Polygon-based NDVI service format
+            roi_area = service_result.get("area_km2", 0)
+        else:
+            # Regular service format
+            roi_area = service_result.get("roi_area_km2", 0)
         
         # Handle different service result formats
         if analysis_type == "ndvi" and NDVI_SERVICE_AVAILABLE:
             # NDVIService returns results in a specific format
-            map_stats = service_result.get("mapStats", {})
+            # Check if it's polygon-based (has merged_stats or direct ndvi_stats) or regular (has mapStats)
+            if "merged_stats" in service_result:
+                # Tiled polygon-based NDVI service format
+                map_stats = service_result.get("merged_stats", {})
+                print(f"🔍 Using tiled polygon-based NDVI results: {list(map_stats.keys())}")
+            elif "ndvi_stats" in service_result and "vegetation_distribution" in service_result:
+                # Single polygon-based NDVI service format
+                map_stats = {
+                    "ndvi_stats": service_result.get("ndvi_stats", {}),
+                    "vegetation_distribution": service_result.get("vegetation_distribution", {})
+                }
+                print(f"🔍 Using single polygon-based NDVI results: {list(map_stats.keys())}")
+            else:
+                # Regular NDVI service format
+                map_stats = service_result.get("mapStats", {})
+                print(f"🔍 Using regular NDVI results: {list(map_stats.keys())}")
         else:
             # HTTP service format
             map_stats = service_result.get("mapStats", {})
@@ -849,10 +894,21 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         # Handle different result formats for LULC vs NDVI
         if analysis_type == "ndvi":
             # NDVI-specific results
-            ndvi_stats = map_stats.get("ndvi_statistics", {})
-            veg_distribution = map_stats.get("vegetation_distribution", {})
-            time_series = map_stats.get("time_series", {})
-            mean_ndvi = ndvi_stats.get("mean", 0)
+            if "merged_stats" in service_result:
+                # Polygon-based NDVI service format - data is directly in merged_stats
+                ndvi_stats = map_stats.get("ndvi_stats", {})
+                veg_distribution = map_stats.get("vegetation_distribution", {})
+                time_series = service_result.get("time_series", {})
+                mean_ndvi = ndvi_stats.get("NDVI_mean", 0)
+                print(f"🔍 Tiled polygon NDVI data extracted successfully")
+            else:
+                # Single polygon-based NDVI service format
+                ndvi_stats = map_stats.get("ndvi_stats", {})
+                veg_distribution = map_stats.get("vegetation_distribution", {})
+                time_series = service_result.get("time_series", {})
+                mean_ndvi = ndvi_stats.get("NDVI_mean", 0)
+                print(f"🔍 Single polygon NDVI data extracted successfully")
+            
             dominant_class = f"NDVI: {mean_ndvi:.3f}"
             num_classes = len(veg_distribution)
         else:
@@ -863,7 +919,14 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         
         # Enhanced URLs and metadata (handle both service formats)
         if analysis_type == "ndvi":
-            tile_url = service_result.get("urlFormat", "")
+            # Handle different tile URL formats
+            if "tile_urls" in service_result:
+                # Polygon-based NDVI service format
+                tile_urls_data = service_result.get("tile_urls", {})
+                tile_url = tile_urls_data.get("urlFormat", "")
+            else:
+                # Regular NDVI service format
+                tile_url = service_result.get("urlFormat", "")
             mode_tile_url = tile_url
             median_tile_url = None
         else:
@@ -877,7 +940,8 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
         # Extract enriched metadata (compatible with both services)
         if analysis_type == "ndvi":
             cloud_threshold = metadata.get("cloud_threshold", 20)
-            collection_size = metadata.get("collection_size", 0)
+            # For polygon-based NDVI, get image count from service result
+            collection_size = service_result.get("image_count", metadata.get("collection_size", 0))
             confident_images = collection_size  # All images for NDVI
             histogram_method = debug_info.get("histogram_method", "unknown")
             avg_confidence = None
@@ -904,10 +968,10 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 f"🌱 Mean NDVI: {mean_ndvi:.3f}\n"
                 f"📈 Vegetation categories: {num_classes}\n\n"
                 f"📋 NDVI Statistics:\n"
-                f"   • Mean: {ndvi_stats.get('mean', 0):.3f}\n"
-                f"   • Min: {ndvi_stats.get('min', 0):.3f}\n"
-                f"   • Max: {ndvi_stats.get('max', 0):.3f}\n"
-                f"   • Std Dev: {ndvi_stats.get('std_dev', 0):.3f}\n\n"
+                f"   • Mean: {ndvi_stats.get('NDVI_mean', ndvi_stats.get('mean', 0)):.3f}\n"
+                f"   • Min: {ndvi_stats.get('NDVI_min', ndvi_stats.get('min', 0)):.3f}\n"
+                f"   • Max: {ndvi_stats.get('NDVI_max', ndvi_stats.get('max', 0)):.3f}\n"
+                f"   • Std Dev: {ndvi_stats.get('NDVI_stdDev', ndvi_stats.get('std_dev', 0)):.3f}\n\n"
             )
             
             if veg_distribution:
@@ -1150,15 +1214,24 @@ def _generate_llm_analysis(
     
     # Prepare context for LLM
     if analysis_type == "ndvi":
-        mean_ndvi = stats.get("mean", 0)
-        min_ndvi = stats.get("min", 0) 
-        max_ndvi = stats.get("max", 0)
-        std_dev = stats.get("std_dev", 0)
+        mean_ndvi = stats.get("NDVI_mean", stats.get("mean", 0))
+        min_ndvi = stats.get("NDVI_min", stats.get("min", 0))
+        max_ndvi = stats.get("NDVI_max", stats.get("max", 0))
+        std_dev = stats.get("NDVI_stdDev", stats.get("std_dev", 0))
         
-        # Format vegetation distribution
+        # Format vegetation distribution with proper names
         veg_summary = []
+        category_mapping = {
+            'water_percentage': 'Water',
+            'bare_soil_percentage': 'Bare Soil',
+            'sparse_vegetation_percentage': 'Sparse Vegetation',
+            'moderate_vegetation_percentage': 'Moderate Vegetation',
+            'dense_vegetation_percentage': 'Dense Vegetation'
+        }
+        
         for category, percentage in vegetation_distribution.items():
-            veg_summary.append(f"{category.replace('_', ' ')}: {percentage}%")
+            display_name = category_mapping.get(category, category.replace('_', ' ').title())
+            veg_summary.append(f"- {display_name}: {percentage:.1f}%")
         
         context = f"""
 Location: {location_name}
@@ -1361,7 +1434,7 @@ def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
 
 def _fallback_websearch_analysis(state: AgentState) -> Dict[str, Any]:
     """Fallback analysis when Search API Service is unavailable."""
-    
+
     locations = state.get("locations", [])
     if locations:
         location_names = [loc.get("matched_name", "Unknown") for loc in locations]
