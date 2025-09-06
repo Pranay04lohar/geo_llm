@@ -124,9 +124,10 @@ async def get_location_data(request: LocationRequest):
         )
         
         if not location_data:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Location '{request.location_name}' not found"
+            return LocationResponse(
+                coordinates={"lat": 0.0, "lng": 0.0},
+                success=False,
+                error=f"Location '{request.location_name}' not found"
             )
         
         return LocationResponse(**location_data)
@@ -134,9 +135,9 @@ async def get_location_data(request: LocationRequest):
     except Exception as e:
         logger.error(f"Error resolving location {request.location_name}: {e}")
         return LocationResponse(
+            coordinates={"lat": 0.0, "lng": 0.0},
             success=False,
-            error=str(e),
-            coordinates={"lat": 0.0, "lng": 0.0}
+            error=str(e)
         )
 
 # Environmental context endpoint
@@ -151,26 +152,27 @@ async def get_environmental_context(request: EnvironmentalContextRequest):
     try:
         logger.info(f"Getting environmental context for {request.location} ({request.analysis_type})")
         
-        # Generate search queries based on location and analysis type
-        search_queries = _generate_search_queries(
-            request.location, 
-            request.analysis_type, 
+        # Use the new environmental context method
+        environmental_data = await location_resolver.get_environmental_context(
+            request.location,
+            request.analysis_type,
             request.query
         )
         
-        # Search using Tavily
-        search_results = []
-        for query in search_queries:
-            results = await tavily_client.search(query)
-            search_results.extend(results)
-        
-        # Process and categorize results
-        processed_results = result_processor.process_environmental_results(
-            search_results, 
-            request.analysis_type
-        )
-        
-        return EnvironmentalContextResponse(**processed_results)
+        if environmental_data:
+            return EnvironmentalContextResponse(
+                reports=environmental_data.get("reports", []),
+                studies=environmental_data.get("studies", []),
+                news=environmental_data.get("news", []),
+                statistics={"total_sources": environmental_data.get("total_sources", 0)},
+                context_summary=f"Found {environmental_data.get('total_sources', 0)} sources for {request.analysis_type} analysis",
+                success=True
+            )
+        else:
+            return EnvironmentalContextResponse(
+                success=False,
+                error="No environmental context found"
+            )
         
     except Exception as e:
         logger.error(f"Error getting environmental context: {e}")

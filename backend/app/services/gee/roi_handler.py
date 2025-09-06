@@ -10,6 +10,7 @@ Extracts and validates ROI from various sources:
 
 import re
 import os
+import requests
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
@@ -63,6 +64,7 @@ class ROIHandler:
     def __init__(self):
         """Initialize ROI handler with geocoding setup."""
         self.geocoder = None
+        self.search_api_url = "http://localhost:8001"  # Search API Service URL
         self._setup_geocoder()
         
         # Default location (Mumbai) as fallback
@@ -114,16 +116,37 @@ class ROIHandler:
         if not location_name:
             return None
             
-        # Geocode the location name to coordinates
-        coords = self._geocode_location(location_name)
-        if not coords:
-            return None
-            
-        lat, lng = coords
+        # Try to get location data from Search API Service first
+        search_data = self._get_location_from_search_api(location_name, location_type)
+        
+        if search_data:
+            # Use Search API Service data
+            lat, lng = search_data["lat"], search_data["lng"]
+            area_km2 = search_data.get("area_km2")
+            print(f"✅ Using Search API data for {location_name}: {lat:.4f}°N, {lng:.4f}°E, {area_km2} km²")
+        else:
+            # Fallback to geocoding
+            coords = self._geocode_location(location_name)
+            if not coords:
+                return None
+            lat, lng = coords
+            area_km2 = None
+            print(f"⚠️ Using fallback geocoding for {location_name}: {lat:.4f}°N, {lng:.4f}°E")
         
         # Get dynamic ROI dimensions based on city characteristics
         location_type = primary_location.get("type", "city").lower()
-        dimensions = self._get_dynamic_roi_size(location_type, location_name)
+        
+        # Use Search API area data if available, otherwise use hardcoded dimensions
+        if search_data and area_km2:
+            # Calculate dimensions from Search API area data
+            # Assume roughly square area for simplicity
+            side_length = (area_km2 ** 0.5) * 1.2  # Add 20% buffer
+            dimensions = {"width": side_length, "height": side_length}
+            print(f"📊 Using Search API area data: {area_km2} km² → {side_length:.1f}km x {side_length:.1f}km")
+        else:
+            # Fallback to hardcoded dimensions
+            dimensions = self._get_dynamic_roi_size(location_type, location_name)
+            print(f"📐 Using hardcoded dimensions: {dimensions['width']}km x {dimensions['height']}km")
         
         # Create ROI geometry with dynamic dimensions
         roi_geometry = self._create_dynamic_geometry(lat, lng, dimensions)
@@ -140,7 +163,9 @@ class ROIHandler:
             "all_locations": locations,
             "buffer_km": max(dimensions["width"], dimensions["height"]) / 2,  # Equivalent radius for compatibility
             "dimensions": dimensions,  # Add actual dimensions used
-            "geometry": roi_geometry
+            "geometry": roi_geometry,
+            "search_api_data": search_data,  # Include Search API data for reference
+            "area_km2": area_km2  # Include area data
         }
         
     def extract_roi_from_query(self, query: str) -> Optional[Dict[str, Any]]:
@@ -235,6 +260,46 @@ class ROIHandler:
             pass
         except Exception:
             pass
+            
+        return None
+        
+    def _get_location_from_search_api(self, location_name: str, location_type: str = "city") -> Optional[Dict[str, Any]]:
+        """
+        Get accurate location data from Search API Service.
+        
+        Args:
+            location_name: Name of the location
+            location_type: Type of location (city, state, etc.)
+            
+        Returns:
+            Dict with coordinates, area, and other location data, or None if failed
+        """
+        try:
+            response = requests.post(
+                f"{self.search_api_url}/search/location-data",
+                json={
+                    "location_name": location_name,
+                    "location_type": location_type
+                },
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success", False):
+                    coords = data.get("coordinates", {})
+                    area = data.get("area_km2")
+                    
+                    if coords.get("lat") and coords.get("lng"):
+                        return {
+                            "lat": coords["lat"],
+                            "lng": coords["lng"],
+                            "area_km2": area,
+                            "source": "search_api"
+                        }
+                        
+        except Exception as e:
+            print(f"⚠️ Search API request failed for {location_name}: {e}")
             
         return None
         

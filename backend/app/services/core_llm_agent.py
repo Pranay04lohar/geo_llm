@@ -378,13 +378,19 @@ def llm_generate_plan_openrouter(user_query: str) -> Dict[str, Any] | None:  # n
     system_prompt = (
         "You are a tool planner for a geospatial assistant.\n"
         "You have 3 tools available:\n"
-        "1) GEE_Tool → for geospatial analysis (maps, ROI, satellite data)\n"
+        "1) GEE_Tool → for geospatial analysis (maps, ROI, satellite data, NDVI, LULC)\n"
         "2) RAG_Tool → for factual/knowledge-based queries (laws, government reports, static datasets)\n"
-        "3) Search_Tool → for external information not in our internal KB (news, latest updates)\n\n"
+        "3) Search_Tool → for comprehensive web-based analysis (location data, environmental context, complete analysis with Tavily API)\n\n"
+        "Search_Tool capabilities:\n"
+        "- Location resolution (coordinates, boundaries, area)\n"
+        "- Environmental context (reports, studies, news)\n"
+        "- Complete analysis fallback when GEE fails\n"
+        "- Web search integration for latest information\n\n"
         "Given a user query, output a JSON with keys: 'subtasks' (list of {step, task}), 'tools_to_use' (list of tool names), 'reasoning' (short string).\n"
         "Output rules:\n"
         "- JSON ONLY. No markdown, no code fences.\n"
         "- For geospatial queries, use ONLY ONE GEE_Tool call that does complete analysis.\n"
+        "- Use Search_Tool for location data, environmental context, or as fallback when GEE might fail.\n"
         "- Avoid multiple subtasks that do the same analysis.\n"
         "- tools_to_use may include one or more of: GEE_Tool, RAG_Tool, Search_Tool.\n"
         "- Steps should be in execution order starting from 1.\n"
@@ -582,6 +588,46 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
         if tool == "GEE_Tool":
             if gee_result_cache is None:
                 gee_result_cache = _run_tool(tool, working_state)
+                
+                # Check if GEE failed and implement fallback to Search API Service
+                if gee_result_cache and not gee_result_cache.get("analysis"):
+                    logger.warning("GEE_Tool failed, falling back to Search API Service")
+                    try:
+                        from app.search_service.integration_client import call_search_service_for_analysis
+                        
+                        # Determine analysis type from query context
+                        query = state.get("query", "")
+                        analysis_type = "ndvi"  # Default
+                        query_lower = query.lower()
+                        if "land use" in query_lower or "lulc" in query_lower:
+                            analysis_type = "lulc"
+                        elif "climate" in query_lower or "weather" in query_lower:
+                            analysis_type = "climate"
+                        elif "population" in query_lower or "demographics" in query_lower:
+                            analysis_type = "population"
+                        elif "water" in query_lower or "hydrology" in query_lower:
+                            analysis_type = "water"
+                        elif "soil" in query_lower:
+                            analysis_type = "soil"
+                        elif "transportation" in query_lower or "roads" in query_lower:
+                            analysis_type = "transportation"
+                        
+                        # Call Search API Service as fallback
+                        fallback_result = call_search_service_for_analysis(query, parsed_locations, analysis_type)
+                        if fallback_result and fallback_result.get("analysis"):
+                            gee_result_cache = {
+                                "analysis": f"🔄 GEE Analysis Failed - Using Search API Fallback\n\n{fallback_result.get('analysis', '')}",
+                                "roi": fallback_result.get("roi"),
+                                "evidence": ["gee_tool:failed", "search_service:fallback_used"] + fallback_result.get("evidence", []),
+                                "sources": fallback_result.get("sources", []),
+                                "confidence": fallback_result.get("confidence", 0.0)
+                            }
+                            logger.info("Successfully used Search API Service as fallback for GEE failure")
+                        else:
+                            logger.error("Both GEE and Search API Service failed")
+                    except Exception as e:
+                        logger.error(f"Error in GEE fallback to Search API Service: {e}")
+                        
             tool_output = gee_result_cache
         else:
             tool_output = _run_tool(tool, working_state)
@@ -1248,11 +1294,61 @@ def rag_tool_node(state: AgentState) -> Dict[str, Any]:
 
 
 def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
-    """Mocked WebSearch tool invocation.
+    """Real WebSearch tool invocation using Search API Service.
 
-    Replace this with a real web search API and summarization.
+    This function now calls the actual Search API Service for web search and analysis.
     """
 
+    # Import the integration client
+    try:
+        from app.search_service.integration_client import call_search_service_for_analysis
+    except ImportError:
+        # Fallback if import fails
+        logger.warning("Could not import Search API Service client, using fallback")
+        return _fallback_websearch_analysis(state)
+
+    locations = state.get("locations", [])
+    query = state.get("query", "")
+    
+    # Determine analysis type from query context
+    analysis_type = "ndvi"  # Default
+    query_lower = query.lower()
+    if "land use" in query_lower or "lulc" in query_lower:
+        analysis_type = "lulc"
+    elif "climate" in query_lower or "weather" in query_lower:
+        analysis_type = "climate"
+    elif "population" in query_lower or "demographics" in query_lower:
+        analysis_type = "population"
+    elif "water" in query_lower or "hydrology" in query_lower:
+        analysis_type = "water"
+    elif "soil" in query_lower:
+        analysis_type = "soil"
+    elif "transportation" in query_lower or "roads" in query_lower:
+        analysis_type = "transportation"
+
+    # Call the Search API Service
+    try:
+        result = call_search_service_for_analysis(query, locations, analysis_type)
+        
+        # Merge with existing evidence
+        evidence = list(state.get("evidence", []))
+        evidence.extend(result.get("evidence", []))
+        
+        return {
+            "analysis": result.get("analysis", "Search analysis completed"),
+            "roi": result.get("roi"),
+            "evidence": evidence,
+            "sources": result.get("sources", []),
+            "confidence": result.get("confidence", 0.0)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calling Search API Service: {e}")
+        return _fallback_websearch_analysis(state)
+
+def _fallback_websearch_analysis(state: AgentState) -> Dict[str, Any]:
+    """Fallback analysis when Search API Service is unavailable."""
+    
     locations = state.get("locations", [])
     if locations:
         location_names = [loc.get("matched_name", "Unknown") for loc in locations]
@@ -1261,12 +1357,30 @@ def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
         location_text = ""
 
     analysis = (
-        f"Identified external information request {location_text}. Returning a mocked web summary. "
-        "Integrate web search and summarization here."
+        f"🔍 Search Analysis {location_text}\n"
+        f"{'=' * 50}\n"
+        f"⚠️ Search API Service temporarily unavailable\n"
+        f"📝 Query: {state.get('query', 'Unknown')}\n"
+        f"📍 Locations: {', '.join(location_names) if locations else 'None detected'}\n\n"
+        f"💡 This is a fallback response. The Search API Service provides:\n"
+        f"   • Location resolution and boundaries\n"
+        f"   • Environmental context from web sources\n"
+        f"   • Complete analysis based on web data\n"
+        f"   • Integration with Tavily search API\n\n"
+        f"🔧 To enable full functionality, ensure the Search API Service is running:\n"
+        f"   cd backend/app/search_service && python start.py"
     )
+    
     evidence = list(state.get("evidence", []))
-    evidence.append("websearch_tool:mock_result")
-    return {"analysis": analysis, "roi": None, "evidence": evidence}
+    evidence.append("websearch_tool:fallback_used")
+    
+    return {
+        "analysis": analysis, 
+        "roi": None, 
+        "evidence": evidence,
+        "sources": [],
+        "confidence": 0.0
+    }
 
 
 def aggregate_node(state: AgentState) -> Dict[str, Any]:

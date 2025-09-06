@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, List
 import re
 import json
 from .tavily_client import TavilyClient
+from .nominatim_client import NominatimClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class LocationResolver:
     
     def __init__(self):
         self.tavily_client = TavilyClient()
+        self.nominatim_client = NominatimClient()
         
         # Common location patterns for extraction
         self.coordinate_patterns = [
@@ -51,7 +53,7 @@ class LocationResolver:
         location_type: str = "city"
     ) -> Optional[Dict[str, Any]]:
         """
-        Resolve location name to geographical data.
+        Resolve location name to geographical data using Nominatim.
         
         Args:
             location_name: Name of the location to resolve
@@ -63,70 +65,156 @@ class LocationResolver:
         try:
             logger.info(f"Resolving location: {location_name} ({location_type})")
             
-            # Generate search queries for location data
-            search_queries = self._generate_location_queries(location_name, location_type)
-            
-            # Search for location information
-            all_results = []
-            for query in search_queries:
-                results = await self.tavily_client.search(query, max_results=3)
-                all_results.extend(results)
-            
-            if not all_results:
-                logger.warning(f"No search results found for location: {location_name}")
-                return None
-            
-            # Extract location data from search results
-            location_data = self._extract_location_data(location_name, all_results)
+            # Use Nominatim for accurate location data
+            logger.info(f"Calling nominatim_client.search_location for {location_name}")
+            location_data = self.nominatim_client.search_location(location_name, location_type)
+            logger.info(f"Nominatim client returned: {location_data is not None}")
             
             if location_data:
-                logger.info(f"Successfully resolved location: {location_name}")
+                logger.info(f"Successfully resolved location via Nominatim: {location_name}")
                 return location_data
             else:
-                logger.warning(f"Could not extract location data for: {location_name}")
+                logger.warning(f"Could not resolve location via Nominatim: {location_name}")
                 return None
                 
         except Exception as e:
             logger.error(f"Error resolving location {location_name}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+    
+    async def get_environmental_context(
+        self, 
+        location_name: str, 
+        analysis_type: str, 
+        query: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get environmental context using Tavily search.
+        
+        Args:
+            location_name: Name of the location
+            analysis_type: Type of analysis (ndvi, climate, etc.)
+            query: Original user query
+            
+        Returns:
+            Dictionary with environmental context or None
+        """
+        try:
+            logger.info(f"Getting environmental context for {location_name} ({analysis_type})")
+            
+            # Generate environmental search queries
+            search_queries = self._generate_environmental_queries(location_name, analysis_type)
+            
+            # Search for environmental information
+            all_results = []
+            for search_query in search_queries:
+                results = await self.tavily_client.search(search_query, max_results=5)
+                all_results.extend(results)
+            
+            if not all_results:
+                logger.warning(f"No environmental results found for {location_name}")
+                return None
+            
+            # Process environmental results
+            environmental_data = self._process_environmental_results(all_results, analysis_type)
+            
+            if environmental_data:
+                logger.info(f"Successfully retrieved environmental context for {location_name}")
+                return environmental_data
+            else:
+                logger.warning(f"Could not process environmental results for {location_name}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting environmental context for {location_name}: {e}")
+            return None
+    
+    def _generate_environmental_queries(self, location_name: str, analysis_type: str) -> List[str]:
+        """Generate environmental search queries for Tavily."""
+        queries = []
+        
+        if analysis_type == "ndvi":
+            queries.extend([
+                f"{location_name} ndvi analysis 2023",
+                f"{location_name} environmental report",
+                f"{location_name} vegetation health study",
+                f"{location_name} NDVI satellite data",
+                f"{location_name} vegetation index study",
+                f"{location_name} green cover analysis",
+                f"{location_name} environmental policy",
+                f"{location_name} conservation initiatives",
+                f"{location_name} climate data"
+            ])
+        elif analysis_type == "climate":
+            queries.extend([
+                f"{location_name} climate data 2023",
+                f"{location_name} weather patterns",
+                f"{location_name} temperature rainfall",
+                f"{location_name} climate change impact"
+            ])
+        else:
+            queries.extend([
+                f"{location_name} environmental conditions",
+                f"{location_name} environmental report",
+                f"{location_name} environmental data"
+            ])
+        
+        return queries
+    
+    def _process_environmental_results(self, results: List[Dict[str, Any]], analysis_type: str) -> Optional[Dict[str, Any]]:
+        """Process environmental search results."""
+        try:
+            reports = []
+            studies = []
+            news = []
+            
+            for result in results:
+                content = result.get("content", "")
+                title = result.get("title", "")
+                url = result.get("url", "")
+                
+                # Categorize results
+                if any(keyword in content.lower() for keyword in ["report", "study", "research", "analysis"]):
+                    studies.append({
+                        "title": title,
+                        "url": url,
+                        "content": content[:500] + "..." if len(content) > 500 else content
+                    })
+                elif any(keyword in content.lower() for keyword in ["news", "update", "recent", "latest"]):
+                    news.append({
+                        "title": title,
+                        "url": url,
+                        "content": content[:300] + "..." if len(content) > 300 else content
+                    })
+                else:
+                    reports.append({
+                        "title": title,
+                        "url": url,
+                        "content": content[:400] + "..." if len(content) > 400 else content
+                    })
+            
+            return {
+                "reports": reports,
+                "studies": studies,
+                "news": news,
+                "analysis_type": analysis_type,
+                "total_sources": len(results)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing environmental results: {e}")
             return None
     
     def _generate_location_queries(self, location_name: str, location_type: str) -> List[str]:
         """Generate search queries for location data."""
         queries = []
         
-        # Basic location queries
+        # Simplified queries - just what we need
         queries.extend([
-            f"{location_name} coordinates latitude longitude",
-            f"{location_name} geographical location",
-            f"{location_name} area population statistics",
-            f"{location_name} administrative boundaries",
-        ])
-        
-        # Type-specific queries
-        if location_type == "city":
-            queries.extend([
-                f"{location_name} city area km2",
-                f"{location_name} urban area boundaries",
-                f"{location_name} metropolitan area",
-            ])
-        elif location_type == "state":
-            queries.extend([
-                f"{location_name} state area km2",
-                f"{location_name} state boundaries",
-                f"{location_name} state population",
-            ])
-        elif location_type == "country":
-            queries.extend([
-                f"{location_name} country area km2",
-                f"{location_name} national boundaries",
-                f"{location_name} country population",
-            ])
-        
-        # Wikipedia and official sources
-        queries.extend([
-            f"{location_name} wikipedia geographical data",
-            f"{location_name} official statistics area",
-            f"{location_name} government geographical information",
+            f"{location_name} coordinates latitude longitude India",
+            f"{location_name} area km2 India",
+            f"{location_name} geographical location India"
         ])
         
         return queries
@@ -154,11 +242,17 @@ class LocationResolver:
             # Extract coordinates
             coordinates = self._extract_coordinates(combined_content)
             if not coordinates:
-                logger.warning(f"Could not extract coordinates for {location_name}")
-                return None
+                # Try fallback coordinates for major cities
+                coordinates = self._get_fallback_coordinates(location_name)
+                if not coordinates:
+                    logger.warning(f"Could not extract coordinates for {location_name}")
+                    return None
             
             # Extract area
             area_km2 = self._extract_area(combined_content)
+            if not area_km2:
+                # Try fallback area data for major cities
+                area_km2 = self._get_fallback_area(location_name)
             
             # Extract population
             population = self._extract_population(combined_content)
@@ -197,9 +291,15 @@ class LocationResolver:
                     lat, lng = matches[0]
                     lat, lng = float(lat), float(lng)
                     
-                    # Validate coordinate ranges
+                    # Validate coordinate ranges and Indian region
                     if -90 <= lat <= 90 and -180 <= lng <= 180:
-                        return {"lat": lat, "lng": lng}
+                        # Additional validation for Indian coordinates
+                        if 8 <= lat <= 37 and 68 <= lng <= 97:
+                            return {"lat": lat, "lng": lng}
+                        # Allow other valid coordinates but log warning
+                        elif -90 <= lat <= 90 and -180 <= lng <= 180:
+                            logger.warning(f"Found non-Indian coordinates: {lat}, {lng}")
+                            return {"lat": lat, "lng": lng}
                 except (ValueError, IndexError):
                     continue
         
@@ -218,9 +318,65 @@ class LocationResolver:
                     
                     # Basic validation
                     if -90 <= lat <= 90 and -180 <= lng <= 180:
-                        return {"lat": lat, "lng": lng}
+                        # Additional validation for Indian coordinates
+                        if 8 <= lat <= 37 and 68 <= lng <= 97:
+                            return {"lat": lat, "lng": lng}
+                        # Allow other valid coordinates but log warning
+                        elif -90 <= lat <= 90 and -180 <= lng <= 180:
+                            logger.warning(f"Found non-Indian coordinates: {lat}, {lng}")
+                            return {"lat": lat, "lng": lng}
                 except (ValueError, IndexError):
                     continue
+        
+        return None
+    
+    def _get_fallback_coordinates(self, location_name: str) -> Optional[Dict[str, float]]:
+        """Get fallback coordinates for major Indian cities with accurate data."""
+        fallback_coords = {
+            "mumbai": {"lat": 19.0760, "lng": 72.8777},
+            "delhi": {"lat": 28.7041, "lng": 77.1025},
+            "bangalore": {"lat": 12.9716, "lng": 77.5946},
+            "kolkata": {"lat": 22.5726, "lng": 88.3639},
+            "chennai": {"lat": 13.0827, "lng": 80.2707},
+            "hyderabad": {"lat": 17.3850, "lng": 78.4867},
+            "pune": {"lat": 18.5204, "lng": 73.8567},
+            "ahmedabad": {"lat": 23.0225, "lng": 72.5714},  # Correct coordinates
+            "jaipur": {"lat": 26.9124, "lng": 75.7873},
+            "surat": {"lat": 21.1702, "lng": 72.8311},
+            "lucknow": {"lat": 26.8467, "lng": 80.9462},
+            "kanpur": {"lat": 26.4499, "lng": 80.3319},
+        }
+        
+        location_lower = location_name.lower()
+        for city, coords in fallback_coords.items():
+            if city in location_lower:
+                logger.info(f"Using fallback coordinates for {location_name}: {coords}")
+                return coords
+        
+        return None
+    
+    def _get_fallback_area(self, location_name: str) -> Optional[float]:
+        """Get fallback area data for major Indian cities with accurate data."""
+        fallback_areas = {
+            "mumbai": 603.4,      # Greater Mumbai
+            "delhi": 1483.0,      # NCT Delhi
+            "bangalore": 741.0,   # BBMP area
+            "kolkata": 206.1,     # KMC area
+            "chennai": 426.0,     # Chennai Corporation
+            "hyderabad": 650.0,   # GHMC area
+            "pune": 331.3,        # PMC area
+            "ahmedabad": 505.0,   # AMC area - Correct area
+            "jaipur": 467.0,      # JMC area
+            "surat": 326.0,       # SMC area
+            "lucknow": 349.0,     # LMC area
+            "kanpur": 267.0,      # KNN area
+        }
+        
+        location_lower = location_name.lower()
+        for city, area in fallback_areas.items():
+            if city in location_lower:
+                logger.info(f"Using fallback area for {location_name}: {area} km²")
+                return area
         
         return None
     
