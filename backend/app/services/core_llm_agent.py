@@ -174,6 +174,14 @@ except ImportError as e:
     print(f"Warning: NDVIService not available: {e}")
     NDVI_SERVICE_AVAILABLE = False
 
+try:
+    from lst_service import LSTService
+    LST_SERVICE_AVAILABLE = True
+    print("✅ LSTService imported successfully")
+except ImportError as e:
+    print(f"Warning: LSTService not available: {e}")
+    LST_SERVICE_AVAILABLE = False
+
 # Also ensure Earth Engine is initialized for any direct EE usage
 try:
     import ee
@@ -599,12 +607,41 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
                     try:
                         from app.search_service.integration_client import call_search_service_for_analysis
                         
-                        # Determine analysis type from query context
+                        # Determine analysis type from query context (same logic as main flow)
                         query = state.get("query", "")
-                        analysis_type = "ndvi"  # Default
                         query_lower = query.lower()
-                        if "land use" in query_lower or "lulc" in query_lower:
+                        
+                        # Check for LST/temperature-specific queries (PRIORITY)
+                        is_lst_query = any(keyword in query_lower for keyword in [
+                            "temperature", "heat", "thermal", "lst", "land surface temperature",
+                            "urban heat island", "uhi", "hot", "cool", "warming", "climate",
+                            "surface temp", "thermal analysis", "heat island", "temperature analysis"
+                        ])
+                        
+                        # Check for NDVI/vegetation-specific queries
+                        is_ndvi_query = any(keyword in query_lower for keyword in [
+                            "ndvi", "vegetation", "greenness", "plant", "tree", "forest health",
+                            "vegetation index", "canopy", "biomass", "chlorophyll", "photosynthesis",
+                            "vegetation analysis", "vegetation health", "green cover", "leaf"
+                        ])
+                        
+                        # Check for LULC-specific queries
+                        is_lulc_query = any(keyword in query_lower for keyword in [
+                            "land use", "land cover", "lulc", "urban", "built", "classification",
+                            "developed", "settlement", "infrastructure", "city", "agricultural",
+                            "cropland", "farming"
+                        ])
+                        
+                        # Determine analysis type - prioritize LST for temperature queries
+                        if is_lst_query:
+                            analysis_type = "lst"
+                            print("🌡️ Fallback: Detected LST/temperature analysis query")
+                        elif is_ndvi_query and not is_lulc_query:
+                            analysis_type = "ndvi"
+                            print("🌿 Fallback: Detected NDVI/vegetation analysis query")
+                        elif is_lulc_query and not is_ndvi_query:
                             analysis_type = "lulc"
+                            print("🗺️ Fallback: Detected LULC analysis query")
                         elif "climate" in query_lower or "weather" in query_lower:
                             analysis_type = "climate"
                         elif "population" in query_lower or "demographics" in query_lower:
@@ -615,6 +652,10 @@ def execute_plan_node(state: AgentState) -> Dict[str, Any]:
                             analysis_type = "soil"
                         elif "transportation" in query_lower or "roads" in query_lower:
                             analysis_type = "transportation"
+                        else:
+                            # Default to LULC as it's more general
+                            analysis_type = "lulc"
+                            print("ℹ️ Fallback: Using LULC analysis as default")
                         
                         # Call Search API Service as fallback
                         fallback_result = call_search_service_for_analysis(query, parsed_locations, analysis_type)
@@ -760,8 +801,18 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             "cropland", "farming"
         ])
         
-        # Determine service to use
-        if is_ndvi_query and not is_lulc_query:
+        # Check for LST/temperature-specific queries
+        is_lst_query = any(keyword in query_lower for keyword in [
+            "temperature", "heat", "thermal", "lst", "land surface temperature",
+            "urban heat island", "uhi", "hot", "cool", "warming", "climate",
+            "surface temp", "thermal analysis", "heat island", "temperature analysis"
+        ])
+        
+        # Determine service to use - prioritize LST for temperature queries
+        if is_lst_query:
+            analysis_type = "lst"
+            print("🌡️ Detected LST/temperature analysis query")
+        elif is_ndvi_query and not is_lulc_query:
             analysis_type = "ndvi"
             print("🌿 Detected NDVI/vegetation analysis query")
         elif is_lulc_query and not is_ndvi_query:
@@ -852,8 +903,66 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 print(f"⚠️ Direct NDVI service failed, falling back to HTTP: {e}")
                 service_result = _fallback_to_http_ndvi_service(roi_geometry, scale)
                 
+        elif analysis_type == "lst" and LST_SERVICE_AVAILABLE:
+            # Use LSTService directly for better integration with polygon geometry
+            print("📡 Using direct LSTService integration with polygon geometry")
+            try:
+                # Check if we have polygon geometry data from Search API
+                if roi_info and roi_info.get("polygon_geometry"):
+                    print("🎯 Using polygon-based LST analysis")
+                    print(f"🔍 ROI data keys: {list(roi_info.keys())}")
+                    print(f"🔍 Polygon geometry type: {roi_info.get('polygon_geometry', {}).get('type', 'unknown')}")
+                    print(f"🔍 Geometry tiles count: {len(roi_info.get('geometry_tiles', []))}")
+                    print(f"🔍 Is tiled: {roi_info.get('is_tiled', False)}")
+                    print(f"🔍 Is fallback: {roi_info.get('is_fallback', False)}")
+                    
+                    try:
+                        service_result = LSTService.analyze_lst_with_polygon(
+                            roi_data=roi_info,
+                            start_date="2023-06-01",  # Shorter time range
+                            end_date="2023-08-31",    # 3 months instead of 12
+                            include_uhi=True,         # Enable UHI analysis
+                            include_time_series=False, # Disable time-series for speed
+                            scale=max(scale, 1000),   # LST uses 1km resolution
+                            max_pixels=1e8,           # Reasonable limit for LST
+                            exact_computation=False
+                        )
+                        print(f"🔍 LST service result keys: {list(service_result.keys()) if service_result else 'None'}")
+                        print(f"🔍 LST service success: {service_result.get('success', False) if service_result else 'None'}")
+                        print(f"🔍 LST service area: {service_result.get('area_km2', 'None') if service_result else 'None'}")
+                    except Exception as e:
+                        print(f"❌ LST service error: {e}")
+                        import traceback
+                        print(f"❌ Traceback: {traceback.format_exc()}")
+                        service_result = {"success": False, "error": str(e)}
+                else:
+                    print("⚠️ Using fallback geometry-based LST analysis")
+                    # For fallback, we'll use HTTP service
+                    service_result = _call_http_service(analysis_type, roi_geometry, scale)
+                
+                if not service_result.get("success", False):
+                    # Handle LST service errors
+                    error_msg = service_result.get("error", "Unknown LST service error")
+                    error_type = service_result.get("error_type", "unknown")
+                    
+                    evidence = list(state.get("evidence", []))
+                    evidence.append(f"lst_service:error_{error_type}")
+                    
+                    analysis = (
+                        f"❌ LST Analysis Failed: {error_msg}\n"
+                        f"🔧 Error Type: {error_type}\n"
+                        f"💡 This may be due to data availability or processing limits."
+                    )
+                    
+                    return {"analysis": analysis, "roi": None, "evidence": evidence}
+                    
+            except Exception as e:
+                # Fallback to HTTP request if direct service fails
+                print(f"⚠️ Direct LST service failed, falling back to HTTP: {e}")
+                service_result = _call_http_service(analysis_type, roi_geometry, scale)
+                
         else:
-            # For LULC or when NDVI service unavailable, use HTTP requests
+            # For LULC or when services unavailable, use HTTP requests
             print("📡 Using HTTP service integration")
             service_result = _call_http_service(analysis_type, roi_geometry, scale)
         
@@ -891,7 +1000,7 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             # HTTP service format
             map_stats = service_result.get("mapStats", {})
         
-        # Handle different result formats for LULC vs NDVI
+        # Handle different result formats for LULC vs NDVI vs LST
         if analysis_type == "ndvi":
             # NDVI-specific results
             if "merged_stats" in service_result:
@@ -911,6 +1020,19 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             
             dominant_class = f"NDVI: {mean_ndvi:.3f}"
             num_classes = len(veg_distribution)
+        elif analysis_type == "lst":
+            # LST-specific results
+            lst_stats = service_result.get("lst_stats", {})
+            uhi_intensity = service_result.get("uhi_intensity", 0)
+            uhi_details = service_result.get("uhi_details", {})
+            time_series = service_result.get("time_series", {})
+            mean_lst = lst_stats.get("LST_mean", 0)
+            print(f"🔍 LST data extracted successfully")
+            print(f"🔍 UHI intensity: {uhi_intensity:.2f}°C")
+            print(f"🔍 UHI method: {uhi_details.get('method', 'unknown')}")
+            
+            dominant_class = f"LST: {mean_lst:.1f}°C"
+            num_classes = 1  # LST is a single metric
         else:
             # LULC-specific results
             class_percentages = map_stats.get("class_percentages", {})
@@ -929,6 +1051,17 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 tile_url = service_result.get("urlFormat", "")
             mode_tile_url = tile_url
             median_tile_url = None
+        elif analysis_type == "lst":
+            # LST-specific tile URL handling
+            if "tile_urls" in service_result:
+                # Polygon-based LST service format
+                tile_urls_data = service_result.get("tile_urls", {})
+                tile_url = tile_urls_data.get("urlFormat", "")
+            else:
+                # Regular LST service format
+                tile_url = service_result.get("urlFormat", "")
+                mode_tile_url = tile_url
+                median_tile_url = None
         else:
             visualization = service_result.get("visualization", {})
             mode_tile_url = visualization.get("mode_tile_url", "")
@@ -946,6 +1079,16 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             histogram_method = debug_info.get("histogram_method", "unknown")
             avg_confidence = None
             date_range = {}
+        elif analysis_type == "lst":
+            # LST-specific metadata
+            collection_size = service_result.get("image_count", metadata.get("collection_size", 0))
+            confident_images = collection_size  # All images for LST
+            histogram_method = "lst_analysis"
+            avg_confidence = None
+            date_range = {
+                "start": metadata.get("start_date", "2023-06-01"),
+                "end": metadata.get("end_date", "2023-08-31")
+            }
         else:
             confidence_used = metadata.get("confidence_threshold_used", 0.5)
             collection_size = metadata.get("collection_size", 0)
@@ -1009,6 +1152,93 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
                 vegetation_distribution=veg_distribution,
                 location_name=locations[0].get('matched_name', 'Unknown') if locations else 'Unknown',
                 mode="summary"  # Use summary mode for concise output
+            )
+            if llm_interpretation:
+                analysis += f"\n\n🤖 AI Analysis:\n{llm_interpretation}"
+                
+        elif analysis_type == "lst":
+            # LST-specific analysis text
+            description = service_result.get("extraDescription", "")
+            
+            analysis = (
+                f"🌡️ Land Surface Temperature Analysis - {roi_source.replace('_', ' ').title()}\n"
+                f"{'=' * 60}\n"
+                f"📍 Location: {locations[0].get('matched_name', 'Unknown') if locations else 'Default ROI'}\n"
+                f"📊 Area analyzed: {roi_area:.2f} km²\n"
+                f"⏱️ Processing time: {processing_time:.1f}s ({histogram_method} method)\n"
+                f"🌡️ Mean LST: {mean_lst:.1f}°C\n"
+                f"🏙️ UHI Intensity: {uhi_intensity:.2f}°C\n\n"
+                f"📋 LST Statistics:\n"
+                f"   • Mean: {lst_stats.get('LST_mean', 0):.1f}°C\n"
+                f"   • Min: {lst_stats.get('LST_min', 0):.1f}°C\n"
+                f"   • Max: {lst_stats.get('LST_max', 0):.1f}°C\n"
+                f"   • Std Dev: {lst_stats.get('LST_stdDev', 0):.1f}°C\n\n"
+            )
+            
+            # Add UHI details if available
+            if uhi_details:
+                method = uhi_details.get("method", "unknown")
+                analysis += f"🏙️ Urban Heat Island Analysis:\n"
+                analysis += f"   • Method: {method}\n"
+                
+                if method == "dynamic_world_lulc":
+                    urban_lst = uhi_details.get("urban_lst")
+                    rural_lst = uhi_details.get("rural_lst")
+                    urban_pixels = uhi_details.get("urban_pixels", 0)
+                    rural_pixels = uhi_details.get("rural_pixels", 0)
+                    urban_percentage = uhi_details.get("urban_percentage", 0)
+                    
+                    if urban_lst is not None and rural_lst is not None:
+                        analysis += f"   • Urban LST: {urban_lst:.1f}°C\n"
+                        analysis += f"   • Rural LST: {rural_lst:.1f}°C\n"
+                        analysis += f"   • Urban pixels: {urban_pixels}\n"
+                        analysis += f"   • Rural pixels: {rural_pixels}\n"
+                        analysis += f"   • Urban coverage: {urban_percentage:.1f}%\n"
+                
+                elif method == "statistical_percentiles":
+                    p90 = uhi_details.get("p90_temperature", 0)
+                    p10 = uhi_details.get("p10_temperature", 0)
+                    p75 = uhi_details.get("p75_temperature", 0)
+                    p25 = uhi_details.get("p25_temperature", 0)
+                    interpretation = uhi_details.get("interpretation", "")
+                    
+                    analysis += f"   • P90 Temperature: {p90:.1f}°C\n"
+                    analysis += f"   • P10 Temperature: {p10:.1f}°C\n"
+                    analysis += f"   • P75-P25 Range: {p75-p25:.1f}°C\n"
+                    if interpretation:
+                        analysis += f"   • Interpretation: {interpretation}\n"
+                
+                analysis += "\n"
+            
+            if time_series and "data" in time_series:
+                method = time_series.get("method", "unknown")
+                data_points = len(time_series["data"])
+                analysis += f"📊 Time-Series Analysis:\n"
+                analysis += f"   • Method: {method}\n"
+                analysis += f"   • Data points: {data_points}\n\n"
+            
+            analysis += f"🛰️ Data Quality:\n"
+            analysis += f"   • MODIS images used: {confident_images}\n"
+            analysis += f"   • Date range: {date_range.get('start', 'N/A')} to {date_range.get('end', 'N/A')}\n\n"
+            
+            if description:
+                analysis += f"📝 Analysis Summary:\n   {description}\n\n"
+                
+            analysis += f"🗺️ Interactive Visualization:\n"
+            analysis += f"   • LST tile URL: {'✅ Available' if mode_tile_url else '❌ Failed'}\n"
+            
+            if mode_tile_url:
+                analysis += f"\n🔗 Map Tile URL: {mode_tile_url[:100]}{'...' if len(mode_tile_url) > 100 else ''}"
+            
+            # Add LLM-based interpretation for LST
+            llm_interpretation = _generate_llm_analysis(
+                query=state.get("query", ""),
+                analysis_type="lst",
+                stats=lst_stats,
+                uhi_intensity=uhi_intensity,
+                uhi_details=uhi_details,
+                location_name=locations[0].get('matched_name', 'Unknown') if locations else 'Unknown',
+                mode="summary"
             )
             if llm_interpretation:
                 analysis += f"\n\n🤖 AI Analysis:\n{llm_interpretation}"
@@ -1107,6 +1337,10 @@ def gee_tool_node(state: AgentState) -> Dict[str, Any]:
             evidence.append(f"ndvi_service:direct_integration_success")
             evidence.append(f"ndvi_service:processing_time_{processing_time:.1f}s")
             evidence.append(f"ndvi_service:roi_source_{roi_source}")
+        elif analysis_type == "lst" and LST_SERVICE_AVAILABLE:
+            evidence.append(f"lst_service:direct_integration_success")
+            evidence.append(f"lst_service:processing_time_{processing_time:.1f}s")
+            evidence.append(f"lst_service:roi_source_{roi_source}")
         else:
             evidence.append(f"gee_service:{analysis_type}_analysis_success")
             evidence.append(f"gee_service:roi_source_{roi_source}")
@@ -1202,11 +1436,13 @@ def _generate_llm_analysis(
     query: str, 
     analysis_type: str, 
     stats: Dict[str, Any], 
-    vegetation_distribution: Dict[str, Any],
-    location_name: str,
+    vegetation_distribution: Dict[str, Any] = None,
+    uhi_intensity: float = 0.0,
+    uhi_details: Dict[str, Any] = None,
+    location_name: str = "Unknown",
     mode: str = "summary"  # "summary" or "detailed"
 ) -> str:
-    """Generate LLM-based analysis interpretation of NDVI results."""
+    """Generate LLM-based analysis interpretation of geospatial results."""
     
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
@@ -1251,29 +1487,121 @@ NDVI Interpretation Guide:
 - NDVI 0.3-0.6: Moderate vegetation  
 - NDVI > 0.6: Dense vegetation
 """
+    elif analysis_type == "lst":
+        mean_lst = stats.get("LST_mean", stats.get("mean", 0))
+        min_lst = stats.get("LST_min", stats.get("min", 0))
+        max_lst = stats.get("LST_max", stats.get("max", 0))
+        std_dev = stats.get("LST_stdDev", stats.get("std_dev", 0))
+        
+        # Format UHI details
+        uhi_summary = []
+        if uhi_details:
+            method = uhi_details.get("method", "unknown")
+            uhi_summary.append(f"- Method: {method}")
+            
+            if method == "dynamic_world_lulc":
+                urban_lst = uhi_details.get("urban_lst")
+                rural_lst = uhi_details.get("rural_lst")
+                urban_percentage = uhi_details.get("urban_percentage", 0)
+                if urban_lst is not None and rural_lst is not None:
+                    uhi_summary.append(f"- Urban LST: {urban_lst:.1f}°C")
+                    uhi_summary.append(f"- Rural LST: {rural_lst:.1f}°C")
+                    uhi_summary.append(f"- Urban coverage: {urban_percentage:.1f}%")
+            
+            elif method == "statistical_percentiles":
+                p90 = uhi_details.get("p90_temperature", 0)
+                p10 = uhi_details.get("p10_temperature", 0)
+                p75 = uhi_details.get("p75_temperature", 0)
+                p25 = uhi_details.get("p25_temperature", 0)
+                uhi_summary.append(f"- P90 Temperature: {p90:.1f}°C")
+                uhi_summary.append(f"- P10 Temperature: {p10:.1f}°C")
+                uhi_summary.append(f"- P75-P25 Range: {p75-p25:.1f}°C")
+        
+        context = f"""
+Location: {location_name}
+User Query: {query}
+
+LST Analysis Results:
+- Mean LST: {mean_lst:.1f}°C
+- LST Range: {min_lst:.1f}°C to {max_lst:.1f}°C
+- Standard Deviation: {std_dev:.1f}°C
+- UHI Intensity: {uhi_intensity:.2f}°C
+
+UHI Analysis Details:
+{chr(10).join(uhi_summary) if uhi_summary else "- No detailed UHI data available"}
+
+LST Interpretation Guide:
+- LST < 20°C: Cool areas (water, dense vegetation)
+- LST 20-30°C: Moderate temperature (mixed land cover)
+- LST 30-40°C: Warm areas (urban, bare soil)
+- LST > 40°C: Hot areas (urban heat islands, desert)
+- UHI Intensity > 2°C: Significant urban heat island effect
+- UHI Intensity 1-2°C: Moderate urban heat island effect
+- UHI Intensity < 1°C: Minimal urban heat island effect
+"""
     else:
         return ""
     
     if mode == "summary":
-        system_prompt = (
-            "You are a vegetation and environmental analysis expert. "
-            "First, provide a comprehensive analysis of the NDVI data, then summarize it. "
-            "Your response should have two parts:\n"
-            "1. DETAILED ANALYSIS: Analyze the NDVI data thoroughly including statistics, vegetation distribution, environmental conditions, and patterns.\n"
-            "2. SUMMARY: Condense the key findings into 2-3 clear, actionable sentences (100-150 words max).\n"
-            "Format your response as:\n"
-            "DETAILED ANALYSIS:\n[full analysis]\n\nSUMMARY:\n[concise summary]"
-        )
+        if analysis_type == "ndvi":
+            system_prompt = (
+                "You are a vegetation and environmental analysis expert. "
+                "First, provide a comprehensive analysis of the NDVI data, then summarize it. "
+                "Your response should have two parts:\n"
+                "1. DETAILED ANALYSIS: Analyze the NDVI data thoroughly including statistics, vegetation distribution, environmental conditions, and patterns.\n"
+                "2. SUMMARY: Condense the key findings into 2-3 clear, actionable sentences (100-150 words max).\n"
+                "Format your response as:\n"
+                "DETAILED ANALYSIS:\n[full analysis]\n\nSUMMARY:\n[concise summary]"
+            )
+        elif analysis_type == "lst":
+            system_prompt = (
+                "You are a climate and urban heat island analysis expert. "
+                "First, provide a comprehensive analysis of the LST data, then summarize it. "
+                "Your response should have two parts:\n"
+                "1. DETAILED ANALYSIS: Analyze the LST data thoroughly including temperature statistics, UHI intensity, urban heat island effects, and environmental implications.\n"
+                "2. SUMMARY: Condense the key findings into 2-3 clear, actionable sentences (100-150 words max).\n"
+                "Format your response as:\n"
+                "DETAILED ANALYSIS:\n[full analysis]\n\nSUMMARY:\n[concise summary]"
+            )
+        else:
+            system_prompt = (
+                "You are a geospatial analysis expert. "
+                "First, provide a comprehensive analysis of the data, then summarize it. "
+                "Your response should have two parts:\n"
+                "1. DETAILED ANALYSIS: Analyze the data thoroughly including statistics and patterns.\n"
+                "2. SUMMARY: Condense the key findings into 2-3 clear, actionable sentences (100-150 words max).\n"
+                "Format your response as:\n"
+                "DETAILED ANALYSIS:\n[full analysis]\n\nSUMMARY:\n[concise summary]"
+            )
         max_tokens = 600
     else:  # detailed mode
-        system_prompt = (
-            "You are a vegetation and environmental analysis expert. "
-            "Analyze the NDVI data and provide a comprehensive, insightful interpretation "
-            "that directly answers the user's question. Be specific about vegetation health, "
-            "environmental conditions, notable patterns, and provide actionable insights. "
-            "Include interpretation of the statistics, what they mean for the ecosystem, "
-            "and any recommendations. Provide a thorough analysis in 3-4 paragraphs."
-        )
+        if analysis_type == "ndvi":
+            system_prompt = (
+                "You are a vegetation and environmental analysis expert. "
+                "Analyze the NDVI data and provide a comprehensive, insightful interpretation "
+                "that directly answers the user's question. Be specific about vegetation health, "
+                "environmental conditions, notable patterns, and provide actionable insights. "
+                "Include interpretation of the statistics, what they mean for the ecosystem, "
+                "and any recommendations. Provide a thorough analysis in 3-4 paragraphs."
+            )
+        elif analysis_type == "lst":
+            system_prompt = (
+                "You are a climate and urban heat island analysis expert. "
+                "Analyze the LST data and provide a comprehensive, insightful interpretation "
+                "that directly answers the user's question. Be specific about temperature patterns, "
+                "urban heat island effects, climate implications, and provide actionable insights. "
+                "Include interpretation of the statistics, what they mean for the local climate, "
+                "urban planning implications, and any recommendations. Provide a thorough analysis in 3-4 paragraphs."
+            )
+        else:
+            system_prompt = (
+                "You are a geospatial analysis expert. "
+                "Analyze the data and provide a comprehensive, insightful interpretation "
+                "that directly answers the user's question. Be specific about patterns, "
+                "environmental conditions, and provide actionable insights. "
+                "Include interpretation of the statistics and any recommendations. "
+                "Provide a thorough analysis in 3-4 paragraphs."
+            )
         max_tokens = 500
     
     try:

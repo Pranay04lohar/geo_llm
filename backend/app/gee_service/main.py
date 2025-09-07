@@ -100,6 +100,12 @@ class NDVIRequest(GEERequest):
     includeTimeSeries: bool = True
     exactComputation: bool = False
 
+class LSTRequest(GEERequest):
+    """LST-specific request parameters"""
+    includeUHI: bool = True
+    includeTimeSeries: bool = False
+    exactComputation: bool = False
+
 class TileResponse(BaseModel):
     """Response model for tile-based analysis"""
     urlFormat: str
@@ -334,6 +340,155 @@ async def analyze_ndvi_vegetation(request: NDVIRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Unexpected error in NDVI endpoint: {str(e)}")
+        logger.error(f"❌ Error type: {type(e)}")
+        
+        # Import traceback for detailed error info
+        import traceback
+        logger.error(f"❌ Full traceback:")
+        logger.error(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {type(e).__name__}: {str(e)}"
+        )
+
+@app.post("/lst/land-surface-temperature", response_model=TileResponse)
+async def analyze_lst(request: LSTRequest):
+    """
+    Analyze Land Surface Temperature (LST) using MODIS MOD11A2 data.
+    
+    This endpoint provides:
+    - LST statistics (mean, min, max, std dev)
+    - Urban Heat Island intensity calculation
+    - Time series analysis (optional)
+    - Visualization tiles
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    
+    try:
+        logger.info(f"🌡️ Starting LST analysis for geometry: {request.geometry.get('type', 'unknown')}")
+        
+        # Import LST service
+        from services.lst_service import LSTService
+        
+        # Create ROI data structure (simplified for basic endpoint)
+        roi_data = {
+            "polygon_geometry": request.geometry,
+            "geometry_tiles": [],
+            "is_tiled": False,
+            "is_fallback": False,
+            "area_km2": 0  # Will be calculated by service
+        }
+        
+        # Call LST service
+        result = LSTService.analyze_lst_with_polygon(
+            roi_data=roi_data,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            include_uhi=request.includeUHI,
+            include_time_series=request.includeTimeSeries,
+            scale=request.scale,
+            max_pixels=request.maxPixels,
+            exact_computation=request.exactComputation
+        )
+        
+        if not result.get("success", False):
+            # Handle service-level errors
+            error_detail = result.get("error", "Unknown error")
+            error_type = result.get("error_type", "unknown")
+            
+            if error_type == "quota_exceeded":
+                raise HTTPException(status_code=429, detail=error_detail)
+            elif error_type == "timeout":
+                raise HTTPException(status_code=408, detail=error_detail)
+            elif error_type == "no_data":
+                raise HTTPException(status_code=404, detail=error_detail)
+            else:
+                raise HTTPException(status_code=500, detail=error_detail)
+        
+        logger.info(f"✅ LST analysis completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in LST endpoint: {str(e)}")
+        logger.error(f"❌ Error type: {type(e)}")
+        
+        # Import traceback for detailed error info
+        import traceback
+        logger.error(f"❌ Full traceback:")
+        logger.error(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {type(e).__name__}: {str(e)}"
+        )
+
+@app.post("/lst/urban-heat-island", response_model=TileResponse)
+async def analyze_uhi(request: LSTRequest):
+    """
+    Analyze Urban Heat Island (UHI) intensity using LST data.
+    
+    This endpoint provides:
+    - UHI intensity calculation (urban vs rural temperature difference)
+    - LST statistics for urban and rural areas
+    - Visualization tiles showing UHI patterns
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    
+    try:
+        logger.info(f"🏙️ Starting UHI analysis for geometry: {request.geometry.get('type', 'unknown')}")
+        
+        # Import LST service
+        from services.lst_service import LSTService
+        
+        # Create ROI data structure
+        roi_data = {
+            "polygon_geometry": request.geometry,
+            "geometry_tiles": [],
+            "is_tiled": False,
+            "is_fallback": False,
+            "area_km2": 0
+        }
+        
+        # Call LST service with UHI enabled
+        result = LSTService.analyze_lst_with_polygon(
+            roi_data=roi_data,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            include_uhi=True,  # Force UHI calculation
+            include_time_series=request.includeTimeSeries,
+            scale=request.scale,
+            max_pixels=request.maxPixels,
+            exact_computation=request.exactComputation
+        )
+        
+        if not result.get("success", False):
+            # Handle service-level errors
+            error_detail = result.get("error", "Unknown error")
+            error_type = result.get("error_type", "unknown")
+            
+            if error_type == "quota_exceeded":
+                raise HTTPException(status_code=429, detail=error_detail)
+            elif error_type == "timeout":
+                raise HTTPException(status_code=408, detail=error_detail)
+            elif error_type == "no_data":
+                raise HTTPException(status_code=404, detail=error_detail)
+            else:
+                raise HTTPException(status_code=500, detail=error_detail)
+        
+        logger.info(f"✅ UHI analysis completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in UHI endpoint: {str(e)}")
         logger.error(f"❌ Error type: {type(e)}")
         
         # Import traceback for detailed error info
