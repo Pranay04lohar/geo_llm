@@ -327,6 +327,60 @@ Expected Output (retrieval excerpt)
 }
 ```
 
+## 🚢 Deployment Guide (Redis/FAISS in production)
+
+### How FAISS and Redis work in deployment
+
+- FAISS: In-memory, per-process, per-session indices. No persistence by design.
+  - If you run multiple API replicas, use load-balancer session affinity so a user’s requests hit the same replica during the session TTL; otherwise migrate to a shared vector store (out of MVP scope).
+- Redis: External network service (Docker container, managed Redis like Upstash/Redis Cloud, or your own VM). Used only for quota and session metadata/TTL, not vectors.
+
+### Environment variables for production
+
+- `REDIS_URL`: e.g. `rediss://:PASSWORD@HOST:PORT/0` (managed) or `redis://redis:6379/0` (Compose service name)
+- `SECRET_KEY`: long random value
+- `USE_GPU`: `true` on GPU nodes, `false` otherwise
+- `ALLOWED_FILE_TYPES`: JSON list, e.g. `[".pdf",".txt",".docx",".md"]`
+- `SESSION_TTL_HOURS`, `QUOTA_TTL_HOURS`, `BATCH_SIZE`: tune per workload
+
+### Simple Docker Compose (single host)
+
+```yaml
+version: "3.8"
+services:
+  redis:
+    image: redis:alpine
+    ports: ["6379:6379"]
+
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      USE_GPU: "true"
+      SECRET_KEY: ${SECRET_KEY}
+      ALLOWED_FILE_TYPES: '[".pdf",".txt",".docx",".md"]'
+    ports: ["8000:8000"]
+    depends_on: [redis]
+    # For GPU in containers, install NVIDIA Container Toolkit and enable GPUs:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: ["gpu"]
+```
+
+### Managed Redis (recommended for staging/prod)
+
+1) Create a Redis database (Upstash/Redis Cloud/Aiven). Copy the TLS endpoint.
+2) Set `REDIS_URL=rediss://:PASSWORD@HOST:PORT/0` in your environment.
+3) No code changes required.
+
+### Scaling notes
+
+- For multiple API replicas, prefer load-balancer sticky sessions while using FAISS in-memory.
+- If you require non-sticky load balancing or cross-replica sharing, use a shared vector DB (e.g., PGVector/Weaviate) instead of in-process FAISS (out of scope for this MVP).
+
 ## 🙏 Acknowledgments
 
 - [FastAPI](https://fastapi.tiangolo.com/) for the web framework
