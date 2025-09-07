@@ -91,7 +91,8 @@ class ResultFormatter:
             if "confidence" in service_response:
                 result["confidence"] = service_response["confidence"]
             
-            logger.info(f"Formatted final result for {intent_result.service_type.value} service")
+            service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+            logger.info(f"Formatted final result for {service_type_str} service")
             return result
             
         except Exception as e:

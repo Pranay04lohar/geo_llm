@@ -147,7 +147,8 @@ class GEESubClassifier:
             reasoning = f"LLM returned invalid type '{analysis_type_str}', used keyword fallback"
             confidence = 0.5
         
-        logger.info(f"GEE sub-intent: {gee_sub_intent.value} (confidence: {confidence:.2f}) in {processing_time:.2f}s")
+        gee_sub_str = gee_sub_intent.value if hasattr(gee_sub_intent, 'value') else str(gee_sub_intent)
+        logger.info(f"GEE sub-intent: {gee_sub_str} (confidence: {confidence:.2f}) in {processing_time:.2f}s")
         
         return {
             "gee_sub_intent": gee_sub_intent,
@@ -229,11 +230,13 @@ class GEESubClassifier:
             max_score = scores[gee_sub_intent]
             total_keywords = len(patterns[gee_sub_intent])
             confidence = min(0.9, max_score / total_keywords + 0.1)  # Scale confidence
-            reasoning = f"Keyword match: {max_score} keywords found for {gee_sub_intent.value}"
+            gee_sub_str = gee_sub_intent.value if hasattr(gee_sub_intent, 'value') else str(gee_sub_intent)
+            reasoning = f"Keyword match: {max_score} keywords found for {gee_sub_str}"
         
         processing_time = time.time() - start_time
         
-        logger.info(f"GEE sub-intent (keyword): {gee_sub_intent.value} (confidence: {confidence:.2f})")
+        gee_sub_str = gee_sub_intent.value if hasattr(gee_sub_intent, 'value') else str(gee_sub_intent)
+        logger.info(f"GEE sub-intent (keyword): {gee_sub_str} (confidence: {confidence:.2f})")
         
         return {
             "gee_sub_intent": gee_sub_intent,

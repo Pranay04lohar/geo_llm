@@ -108,8 +108,10 @@ class IntentClassifier:
                 }
             )
             
-            logger.info(f"Intent classification complete: {service_type.value}" + 
-                       (f" → {gee_sub_intent.value}" if gee_sub_intent else "") + 
+            service_type_str = service_type.value if hasattr(service_type, 'value') else str(service_type)
+            gee_sub_str = gee_sub_intent.value if gee_sub_intent and hasattr(gee_sub_intent, 'value') else str(gee_sub_intent) if gee_sub_intent else ""
+            logger.info(f"Intent classification complete: {service_type_str}" + 
+                       (f" → {gee_sub_str}" if gee_sub_intent else "") + 
                        f" (confidence: {confidence:.2f}) in {processing_time:.2f}s")
             
             return result

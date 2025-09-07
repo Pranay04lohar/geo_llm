@@ -79,14 +79,22 @@ class ServiceDispatcher:
             logger.error("Services not initialized, cannot dispatch")
             return self._error_response("Service dispatcher not initialized")
         
-        logger.info(f"Dispatching {intent_result.service_type.value} request: {query[:100]}...")
+        service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+        logger.info(f"Dispatching {service_type_str} request: {query[:100]}...")
         
         try:
-            if intent_result.service_type == ServiceType.GEE:
+            # Handle both enum and string service types
+            service_type = intent_result.service_type
+            if hasattr(service_type, 'value'):
+                service_type_value = service_type.value
+            else:
+                service_type_value = str(service_type)
+            
+            if service_type == ServiceType.GEE or service_type_value == "GEE":
                 return self._dispatch_gee(query, intent_result, location_result)
-            elif intent_result.service_type == ServiceType.RAG:
+            elif service_type == ServiceType.RAG or service_type_value == "RAG":
                 return self._dispatch_rag(query, intent_result, location_result)
-            elif intent_result.service_type == ServiceType.SEARCH:
+            elif service_type == ServiceType.SEARCH or service_type_value == "SEARCH":
                 return self._dispatch_search(query, intent_result, location_result)
             else:
                 logger.error(f"Unknown service type: {intent_result.service_type}")

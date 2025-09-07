@@ -133,7 +133,8 @@ class TopLevelClassifier:
                 reasoning = f"LLM returned invalid intent '{intent_str}', used fallback classification"
                 confidence = 0.5
             
-            logger.info(f"Classified intent: {service_type.value} (confidence: {confidence:.2f}) in {processing_time:.2f}s")
+            service_type_str = service_type.value if hasattr(service_type, 'value') else str(service_type)
+            logger.info(f"Classified intent: {service_type_str} (confidence: {confidence:.2f}) in {processing_time:.2f}s")
             
             return {
                 "service_type": service_type,

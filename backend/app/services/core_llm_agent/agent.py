@@ -97,11 +97,14 @@ class CoreLLMAgent:
             if not intent_result.success:
                 logger.warning(f"Intent classification failed: {intent_result.error}")
             else:
-                logger.info(f"Classified as: {intent_result.service_type.value}" +
-                           (f" → {intent_result.gee_sub_intent.value}" if intent_result.gee_sub_intent else ""))
+                service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+                gee_sub_str = intent_result.gee_sub_intent.value if intent_result.gee_sub_intent and hasattr(intent_result.gee_sub_intent, 'value') else str(intent_result.gee_sub_intent) if intent_result.gee_sub_intent else ""
+                logger.info(f"Classified as: {service_type_str}" +
+                           (f" → {gee_sub_str}" if intent_result.gee_sub_intent else ""))
             
             # Step 3: Service Dispatch
-            logger.info(f"Step 3: Dispatching to {intent_result.service_type.value} service...")
+            service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+            logger.info(f"Step 3: Dispatching to {service_type_str} service...")
             service_response = self.service_dispatcher.dispatch(query, intent_result, location_result)
             
             # Step 4: Result Formatting

@@ -5,7 +5,7 @@ These models define the structure for location entities extracted from queries
 and their resolved geographic information.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from pydantic import BaseModel, Field
 
 
@@ -25,7 +25,7 @@ class BoundaryInfo(BaseModel):
     area_km2: Optional[float] = Field(None, description="Area in square kilometers")
     center: List[float] = Field(..., description="Center coordinates [lng, lat]")
     display_name: str = Field(..., description="Full display name from geocoding service")
-    place_id: Optional[str] = Field(None, description="Unique place identifier")
+    place_id: Optional[Union[str, int]] = Field(None, description="Unique place identifier")
     importance: Optional[float] = Field(None, description="Importance score from geocoding service")
 
 
