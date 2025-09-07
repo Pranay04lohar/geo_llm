@@ -1,0 +1,353 @@
+"""
+Result Formatter - Format service results into consistent output.
+
+This module provides consistent formatting for all service responses,
+ensuring a unified output format regardless of the underlying service used.
+"""
+
+import time
+import logging
+from typing import Dict, Any, List, Optional
+
+try:
+    from ..models.intent import IntentResult
+    from ..models.location import LocationParseResult
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
+    
+    from app.services.core_llm_agent.models.intent import IntentResult
+    from app.services.core_llm_agent.models.location import LocationParseResult
+
+logger = logging.getLogger(__name__)
+
+
+class ResultFormatter:
+    """Formatter for consistent service result output."""
+    
+    def __init__(self):
+        """Initialize the ResultFormatter."""
+        pass
+    
+    def format_final_result(
+        self,
+        query: str,
+        intent_result: IntentResult,
+        location_result: LocationParseResult,
+        service_response: Dict[str, Any],
+        total_processing_time: float
+    ) -> Dict[str, Any]:
+        """Format the final result for the agent contract.
+        
+        Args:
+            query: Original user query
+            intent_result: Intent classification result
+            location_result: Location parsing result
+            service_response: Response from the dispatched service
+            total_processing_time: Total processing time for the request
+            
+        Returns:
+            Final formatted result matching the agent contract
+        """
+        try:
+            # Extract core components
+            analysis = service_response.get("analysis", "Analysis completed")
+            roi = service_response.get("roi")
+            
+            # Enhance analysis with metadata if needed
+            enhanced_analysis = self._enhance_analysis(
+                analysis, query, intent_result, location_result, total_processing_time
+            )
+            
+            # Format ROI if needed
+            formatted_roi = self._format_roi(roi, location_result)
+            
+            # Build evidence trail
+            evidence = self._build_evidence(
+                intent_result, location_result, service_response
+            )
+            
+            # Create final result
+            result = {
+                "analysis": enhanced_analysis,
+                "roi": formatted_roi,
+                "metadata": {
+                    "query": query,
+                    "service_type": intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type),
+                    "analysis_type": intent_result.analysis_type,
+                    "locations_found": len(location_result.entities),
+                    "processing_time": total_processing_time,
+                    "intent_confidence": intent_result.confidence,
+                    "success": True,
+                    "evidence": evidence
+                }
+            }
+            
+            # Add optional fields if available
+            if "sources" in service_response:
+                result["sources"] = service_response["sources"]
+            
+            if "confidence" in service_response:
+                result["confidence"] = service_response["confidence"]
+            
+            logger.info(f"Formatted final result for {intent_result.service_type.value} service")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error formatting final result: {e}")
+            return self._error_result(query, str(e), total_processing_time)
+    
+    def _enhance_analysis(
+        self,
+        analysis: str,
+        query: str,
+        intent_result: IntentResult,
+        location_result: LocationParseResult,
+        processing_time: float
+    ) -> str:
+        """Enhance analysis text with metadata and context.
+        
+        Args:
+            analysis: Original analysis text
+            query: Original query
+            intent_result: Intent classification result
+            location_result: Location parsing result
+            processing_time: Total processing time
+            
+        Returns:
+            Enhanced analysis text
+        """
+        # If analysis is already comprehensive, return as-is
+        if len(analysis) > 500 and "=" in analysis:
+            return analysis
+        
+        # Add header if missing
+        if not analysis.startswith("🌍") and not analysis.startswith("🌿") and not analysis.startswith("🌡️"):
+            header = f"🔍 Analysis Results\n{'=' * 50}\n"
+            
+            # Add query context
+            header += f"📝 Query: {query}\n"
+            
+            # Add location context
+            if location_result.entities:
+                location_names = [entity.matched_name for entity in location_result.entities]
+                header += f"📍 Locations: {', '.join(location_names)}\n"
+            
+            # Add service context
+            service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+            header += f"🔧 Service: {service_type_str}"
+            if intent_result.gee_sub_intent:
+                gee_sub_str = intent_result.gee_sub_intent.value if hasattr(intent_result.gee_sub_intent, 'value') else str(intent_result.gee_sub_intent)
+                header += f" → {gee_sub_str}"
+            header += f" (confidence: {intent_result.confidence:.2f})\n"
+            
+            # Add timing
+            header += f"⏱️ Processing time: {processing_time:.1f}s\n\n"
+            
+            return header + analysis
+        
+        return analysis
+    
+    def _format_roi(
+        self, 
+        roi: Optional[Dict[str, Any]], 
+        location_result: LocationParseResult
+    ) -> Optional[Dict[str, Any]]:
+        """Format ROI for consistent output.
+        
+        Args:
+            roi: ROI from service response
+            location_result: Location parsing result
+            
+        Returns:
+            Formatted ROI or None
+        """
+        if roi:
+            # ROI already formatted by service
+            return roi
+        
+        # Try to create ROI from location result
+        if location_result.primary_location and location_result.roi_geometry:
+            return {
+                "type": "Feature",
+                "properties": {
+                    "name": f"Analysis ROI - {location_result.primary_location.display_name}",
+                    "area_km2": location_result.primary_location.area_km2,
+                    "source": location_result.roi_source,
+                    "center": location_result.primary_location.center
+                },
+                "geometry": location_result.roi_geometry
+            }
+        
+        return None
+    
+    def _build_evidence(
+        self,
+        intent_result: IntentResult,
+        location_result: LocationParseResult,
+        service_response: Dict[str, Any]
+    ) -> List[str]:
+        """Build evidence trail for debugging and transparency.
+        
+        Args:
+            intent_result: Intent classification result
+            location_result: Location parsing result
+            service_response: Service response
+            
+        Returns:
+            List of evidence strings
+        """
+        evidence = []
+        
+        # Location parsing evidence
+        if location_result.success:
+            if location_result.entities:
+                evidence.append(f"location_parser:found_{len(location_result.entities)}_entities")
+                if location_result.resolved_locations:
+                    evidence.append(f"location_parser:resolved_{len(location_result.resolved_locations)}_locations")
+            else:
+                evidence.append("location_parser:no_entities_found")
+        else:
+            evidence.append("location_parser:failed")
+        
+        # Intent classification evidence
+        if intent_result.success:
+            service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
+            evidence.append(f"intent_classifier:{service_type_str.lower()}_selected")
+            if intent_result.gee_sub_intent:
+                gee_sub_str = intent_result.gee_sub_intent.value if hasattr(intent_result.gee_sub_intent, 'value') else str(intent_result.gee_sub_intent)
+                evidence.append(f"intent_classifier:{gee_sub_str.lower()}_subintent")
+        else:
+            evidence.append("intent_classifier:failed")
+        
+        # Service evidence
+        service_evidence = service_response.get("evidence", [])
+        evidence.extend(service_evidence)
+        
+        # Processing time evidence
+        if intent_result.processing_time > 0:
+            evidence.append(f"intent_processing_time_{intent_result.processing_time:.1f}s")
+        if location_result.processing_time > 0:
+            evidence.append(f"location_processing_time_{location_result.processing_time:.1f}s")
+        
+        return evidence
+    
+    def _error_result(
+        self, 
+        query: str, 
+        error_message: str, 
+        processing_time: float
+    ) -> Dict[str, Any]:
+        """Create error result in consistent format.
+        
+        Args:
+            query: Original query
+            error_message: Error description
+            processing_time: Processing time before error
+            
+        Returns:
+            Error result dictionary
+        """
+        return {
+            "analysis": (
+                f"❌ Processing Error\n"
+                f"{'=' * 50}\n"
+                f"📝 Query: {query}\n"
+                f"⚠️ Error: {error_message}\n"
+                f"⏱️ Processing time: {processing_time:.1f}s\n\n"
+                f"🔧 Please try again or contact support if the issue persists."
+            ),
+            "roi": None,
+            "metadata": {
+                "query": query,
+                "service_type": "error",
+                "analysis_type": "error",
+                "locations_found": 0,
+                "processing_time": processing_time,
+                "intent_confidence": 0.0,
+                "success": False,
+                "evidence": ["result_formatter:error"],
+                "error": error_message
+            }
+        }
+    
+    def format_legacy_result(
+        self,
+        result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Format result for backward compatibility with legacy format.
+        
+        Args:
+            result: Modern formatted result
+            
+        Returns:
+            Legacy format result
+        """
+        # Extract only the required fields for the legacy contract
+        return {
+            "analysis": result.get("analysis", ""),
+            "roi": result.get("roi")
+        }
+    
+    def format_debug_result(
+        self,
+        query: str,
+        intent_result: IntentResult,
+        location_result: LocationParseResult,
+        service_response: Dict[str, Any],
+        total_processing_time: float
+    ) -> Dict[str, Any]:
+        """Format detailed debug result with all intermediate data.
+        
+        Args:
+            query: Original user query
+            intent_result: Intent classification result
+            location_result: Location parsing result
+            service_response: Response from the dispatched service
+            total_processing_time: Total processing time
+            
+        Returns:
+            Detailed debug result
+        """
+        regular_result = self.format_final_result(
+            query, intent_result, location_result, service_response, total_processing_time
+        )
+        
+        # Add debug information
+        regular_result["debug"] = {
+            "intent_classification": {
+                "service_type": intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type),
+                "confidence": intent_result.confidence,
+                "gee_sub_intent": intent_result.gee_sub_intent.value if intent_result.gee_sub_intent and hasattr(intent_result.gee_sub_intent, 'value') else str(intent_result.gee_sub_intent) if intent_result.gee_sub_intent else None,
+                "gee_confidence": intent_result.gee_confidence,
+                "reasoning": intent_result.reasoning,
+                "model_used": intent_result.model_used,
+                "processing_time": intent_result.processing_time,
+                "raw_response": intent_result.raw_response
+            },
+            "location_parsing": {
+                "entities_found": len(location_result.entities),
+                "entities": [
+                    {
+                        "name": entity.matched_name,
+                        "type": entity.type,
+                        "confidence": entity.confidence
+                    }
+                    for entity in location_result.entities
+                ],
+                "resolved_count": len(location_result.resolved_locations),
+                "roi_source": location_result.roi_source,
+                "processing_time": location_result.processing_time,
+                "success": location_result.success
+            },
+            "service_response": service_response,
+            "timing": {
+                "total_processing_time": total_processing_time,
+                "intent_time": intent_result.processing_time,
+                "location_time": location_result.processing_time,
+                "service_time": service_response.get("processing_time", 0)
+            }
+        }
+        
+        return regular_result
