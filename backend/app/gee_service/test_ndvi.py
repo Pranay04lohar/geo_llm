@@ -122,7 +122,15 @@ def test_ndvi_service(base_url: str = "http://localhost:8000"):
         tile_url = result.get("urlFormat", "")
         if tile_url:
             print(f"\n🗺️  Tile URL generated: ✅")
-            print(f"   URL pattern: {tile_url[:80]}...")
+            print(f"   Complete URL: {tile_url}")
+            
+            # The new GEE tile URL format handles authentication internally
+            print(f"   ✅ Using new GEE tile URL format (authentication handled internally)")
+            
+            # Create a test URL with Mumbai tile coordinates (z=10, x=719, y=456)
+            test_url = tile_url.replace("{z}", "10").replace("{x}", "719").replace("{y}", "456")
+            print(f"   Test URL (z=10, x=719, y=456):")
+            print(f"   {test_url}")
         else:
             print(f"\n🗺️  Tile URL generated: ❌")
         

@@ -16,16 +16,20 @@ from typing import Dict, Any, List
 from datetime import datetime, timedelta
 import calendar
 import ee
+# Removed unused imports for service account authentication
 
 logger = logging.getLogger(__name__)
 
-# Initialize Earth Engine
+# Initialize Earth Engine with user authentication (for token generation)
 try:
-    ee.Initialize()
-    logger.info("✅ Earth Engine initialized successfully")
+    # Use user authentication (from 'earthengine authenticate') which supports token generation
+    project_id = 'gee-tool-469517'
+    ee.Initialize(project=project_id)
+    logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
 except Exception as e:
     logger.error(f"❌ Failed to initialize Earth Engine: {e}")
-    logger.info("💡 Run 'earthengine authenticate' to set up credentials")
+    logger.info("💡 Run 'earthengine authenticate' to set up user credentials.")
+
 
 class NDVIService:
     """High-performance NDVI analysis service with time-series capabilities"""
@@ -679,14 +683,34 @@ class NDVIService:
                 }
             
             # Generate tile URLs for visualization
-            # Generate tile URLs for visualization
             vis_params = {
-                'min': -0.2,
-                'max': 0.8,
+                'min': -0.3,  # Adjusted to show water/urban areas better
+                'max': 0.2,   # Adjusted to actual data range
                 'palette': NDVIService.NDVI_PALETTE
             }
             map_id = median_ndvi.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            
+            # Debug: Log the complete map_id response
+            logger.info(f"🔍 DEBUG - Complete map_id response: {map_id}")
+            logger.info(f"🔍 DEBUG - map_id keys: {list(map_id.keys()) if map_id else 'None'}")
+            
+            # Handle missing token by generating a new one
+            if map_id and 'token' in map_id and map_id['token']:
+                token = map_id['token']
+                logger.info(f"🔍 DEBUG - Token length: {len(str(token))}")
+                logger.info(f"🔍 DEBUG - Token preview: {str(token)[:50]}...")
+            else:
+                logger.warning(f"⚠️ WARNING - No token found in map_id response!")
+                # Try to get a fresh token using ee.data.getMapId
+                try:
+                    fresh_map_id = ee.data.getMapId({'image': median_ndvi, 'vis_params': vis_params})
+                    token = fresh_map_id.get('token', '')
+                    logger.info(f"🔄 Generated fresh token: {len(str(token))} characters")
+                except Exception as e:
+                    logger.error(f"❌ Failed to generate fresh token: {e}")
+                    token = ''
+            
+            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={token}"
             tile_urls = {"urlFormat": tile_url}
             
             # Time series analysis if requested
@@ -802,13 +826,14 @@ class NDVIService:
             median_ndvi_full = processed_collection.select('NDVI').median().clip(ee_polygon)
             # Generate tile URLs for the full polygon
             vis_params = {
-                'min': -0.2,
-                'max': 0.8,
+                'min': -0.3,  # Adjusted to show water/urban areas better
+                'max': 0.2,   # Adjusted to actual data range
                 'palette': NDVIService.NDVI_PALETTE
             }
             map_id = median_ndvi_full.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
-            tile_urls = {"urlFormat": tile_url}
+            # Use proper GEE tile URL format with correct coordinate order {z}/{x}/{y}
+            tile_url_template = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
+            tile_urls = {"urlFormat": tile_url_template}
             
             # Time series analysis if requested (using full polygon)
             time_series_data = {}
@@ -1087,13 +1112,14 @@ class NDVIService:
             # Generate visualization
             logger.info("Generating NDVI visualization...")
             vis_params = {
-                'min': -0.2,
-                'max': 0.8,
+                'min': -0.3,  # Adjusted to show water/urban areas better
+                'max': 0.2,   # Adjusted to actual data range
                 'palette': NDVIService.NDVI_PALETTE
             }
             
             map_id = median_ndvi.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            # Use proper GEE tile URL format with correct coordinate order {z}/{x}/{y}
+            tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             
             processing_time = time.time() - start_time
             logger.info(f"✅ NDVI analysis completed in {processing_time:.2f}s")

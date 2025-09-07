@@ -351,11 +351,15 @@ def verify_uhi_methods():
             [72.85, 19.05]
         ]])
         
-        # Create a more realistic dummy LST image for testing
-        # In real scenario, this would be actual MODIS LST data
-        dummy_lst = ee.Image.constant(32).rename("LST").addBands(
-            ee.Image.constant(0).rename("QC_Day")  # Add quality band
-        )
+        # Use actual MODIS LST data for realistic testing
+        lst_collection = ee.ImageCollection("MODIS/061/MOD11A2") \
+            .filterDate("2024-01-01", "2024-08-31") \
+            .filterBounds(test_geom) \
+            .select("LST_Day_1km", "QC_Day") \
+            .map(lambda img: img.select("LST_Day_1km").multiply(0.02).subtract(273.15).rename("LST").addBands(img.select("QC_Day")))
+        
+        # Get median composite for testing
+        dummy_lst = lst_collection.median()
         
         print("Testing individual UHI calculation methods...")
         

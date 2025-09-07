@@ -32,9 +32,20 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import json
 import time
+# Removed unused imports for service account authentication
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Initialize Earth Engine with user authentication (for token generation)
+try:
+    # Use user authentication (from 'earthengine authenticate') which supports token generation
+    project_id = 'gee-tool-469517'
+    ee.Initialize(project=project_id)
+    logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Earth Engine: {e}")
+    logger.info("💡 Run 'earthengine authenticate' to set up user credentials.")
 
 class LSTService:
     """
@@ -273,7 +284,8 @@ class LSTService:
                 'palette': LSTService.LST_PALETTE
             }
             map_id = median_lst.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            # Use proper GEE tile URL format with authentication handled internally
+            tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             tile_urls = {"urlFormat": tile_url}
             
             # Time series analysis if requested
@@ -790,7 +802,8 @@ class LSTService:
             ee_polygon_full = ee.Geometry(polygon_geometry)
             median_lst_full = lst_collection.select('LST').median().clip(ee_polygon_full)
             map_id = median_lst_full.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            # Use proper GEE tile URL format with authentication handled internally
+            tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             tile_urls = {"urlFormat": tile_url}
             
             # Time series analysis if requested

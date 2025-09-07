@@ -13,8 +13,20 @@ import time
 import logging
 from typing import Dict, Any, List
 import ee
+# Removed unused imports for service account authentication
 
 logger = logging.getLogger(__name__)
+
+# Initialize Earth Engine with user authentication (for token generation)
+try:
+    # Use user authentication (from 'earthengine authenticate') which supports token generation
+    project_id = 'gee-tool-469517'
+    ee.Initialize(project=project_id)
+    logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Earth Engine: {e}")
+    logger.info("💡 Run 'earthengine authenticate' to set up user credentials.")
+
 
 class LULCService:
     """High-performance LULC analysis service"""
@@ -329,19 +341,22 @@ class LULCService:
             # Generate map tiles
             logger.info("Generating map tiles...")
             vis_params = {
+                'bands': ['label'],  # The band containing the classification
                 'min': 0,
                 'max': 8,
                 'palette': LULCService.DYNAMIC_WORLD_PALETTE
             }
             
             map_id = dw_mode.getMapId(vis_params)
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={map_id['token']}"
+            # Use proper GEE tile URL format with correct coordinate order {z}/{x}/{y}
+            tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             
             # Generate median visualization if requested
             median_tile_url = None
             if include_median_vis and dw_median is not None:
                 median_map_id = dw_median.getMapId(vis_params)
-                median_tile_url = f"https://earthengine.googleapis.com/map/{median_map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={median_map_id['token']}"
+                # Use proper GEE tile URL format with correct coordinate order {z}/{x}/{y}
+                median_tile_url = f"https://earthengine.googleapis.com/v1/{median_map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             
             # Get temporal metadata
             try:
