@@ -115,6 +115,7 @@ class TileResponse(BaseModel):
     processing_time_seconds: float
     roi_area_km2: float
     class_definitions: Dict[str, Any]
+    visualization: Optional[Dict[str, Any]] = None
     success: bool = True
 
 class ErrorResponse(BaseModel):

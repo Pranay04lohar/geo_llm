@@ -138,12 +138,44 @@ def test_ndvi_service(base_url: str = "http://localhost:8000"):
         datasets = result.get("datasets_used", [])
         print(f"\n📚 Datasets used: {', '.join(datasets)}")
         
-        # Display legend configuration
-        legend = result.get("legendConfig", {})
+        # Display visualization and legend metadata
+        print(f"\n🔍 DEBUG - Full response keys: {list(result.keys())}")
+        
+        visualization = result.get('visualization', {})
+        print(f"🔍 DEBUG - Visualization keys: {list(visualization.keys())}")
+        
+        legend = visualization.get('legend', {})
+        print(f"🔍 DEBUG - Legend keys: {list(legend.keys()) if legend else 'No legend found'}")
+        
         if legend:
-            print(f"\n🎨 Visualization:")
-            print(f"   Range: {legend.get('min_value', 0)} to {legend.get('max_value', 1)}")
-            print(f"   Colors: {len(legend.get('palette', []))} color palette")
+            print(f"\n🎨 Legend Metadata:")
+            print(f"   Title: {legend.get('title', 'N/A')}")
+            print(f"   Type: {legend.get('type', 'N/A')}")
+            print(f"   Description: {legend.get('description', 'N/A')}")
+            print(f"   Min Value: {legend.get('min_value', 'N/A')}")
+            print(f"   Max Value: {legend.get('max_value', 'N/A')}")
+            
+            palette = legend.get('palette', [])
+            if palette:
+                print(f"   Color Palette: {len(palette)} colors")
+                print(f"   Colors: {', '.join(palette[:5])}{'...' if len(palette) > 5 else ''}")
+            
+            classes = legend.get('classes', [])
+            if classes:
+                print(f"   Classes: {len(classes)} vegetation categories")
+                print(f"   Class Details:")
+                for cls in classes:
+                    print(f"     - {cls.get('name', 'Unknown')}: {cls.get('range', 'N/A')} ({cls.get('color', 'N/A')})")
+        else:
+            print(f"\n🎨 Legend Information: ❌ No legend data found")
+            print(f"   Available visualization keys: {list(visualization.keys())}")
+        
+        # Display legacy legend configuration (if present)
+        legacy_legend = result.get("legendConfig", {})
+        if legacy_legend:
+            print(f"\n🎨 Legacy Legend Config:")
+            print(f"   Range: {legacy_legend.get('min_value', 0)} to {legacy_legend.get('max_value', 1)}")
+            print(f"   Colors: {len(legacy_legend.get('palette', []))} color palette")
         
         # Display description
         description = result.get("extraDescription", "")

@@ -99,6 +99,39 @@ def test_lulc_service(base_url: str = "http://localhost:8000"):
             else:
                 print(f"\n🗺️  Tile URL generated: ❌")
             
+            # Display legend information
+            print(f"\n🔍 DEBUG - Full response keys: {list(result.keys())}")
+            print(f"🔍 DEBUG - Analysis type: {result.get('analysis_type', 'N/A')}")
+            
+            visualization = result.get('visualization', {})
+            print(f"🔍 DEBUG - Visualization keys: {list(visualization.keys())}")
+            
+            legend = visualization.get('legend', {})
+            print(f"🔍 DEBUG - Legend keys: {list(legend.keys()) if legend else 'No legend found'}")
+            
+            if legend:
+                print(f"\n🎨 Legend Metadata:")
+                print(f"   Title: {legend.get('title', 'N/A')}")
+                print(f"   Type: {legend.get('type', 'N/A')}")
+                print(f"   Description: {legend.get('description', 'N/A')}")
+                print(f"   Min Value: {legend.get('min_value', 'N/A')}")
+                print(f"   Max Value: {legend.get('max_value', 'N/A')}")
+                
+                palette = legend.get('palette', [])
+                if palette:
+                    print(f"   Color Palette: {len(palette)} colors")
+                    print(f"   Colors: {', '.join(palette[:5])}{'...' if len(palette) > 5 else ''}")
+                
+                classes = legend.get('classes', [])
+                if classes:
+                    print(f"   Classes: {len(classes)} land cover types")
+                    print(f"   Class Details:")
+                    for cls in classes:
+                        print(f"     - {cls.get('name', 'Unknown')}: {cls.get('color', 'N/A')} (ID: {cls.get('id', 'N/A')})")
+            else:
+                print(f"\n🎨 Legend Information: ❌ No legend data found")
+                print(f"   Available visualization keys: {list(visualization.keys())}")
+            
             # Display datasets used
             datasets = result.get('datasets_used', [])
             print(f"\n📚 Datasets used: {', '.join(datasets)}")

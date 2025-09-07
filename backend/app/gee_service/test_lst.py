@@ -1,138 +1,3 @@
-# """
-# Test script for LST Service
-
-# This script tests the Land Surface Temperature analysis service
-# using a simple geometry around Mumbai, India.
-# """
-
-# import sys
-# import os
-# from pathlib import Path
-
-# # Add the services directory to the path
-# services_path = Path(__file__).parent / "services"
-# sys.path.append(str(services_path))
-
-# def test_lst_service():
-#     """Test the LST service with a simple geometry."""
-#     try:
-#         # Initialize Earth Engine first
-#         import ee
-#         ee.Initialize()
-#         print("✅ Earth Engine initialized")
-        
-#         from new_lst import LSTService
-        
-#         print("🧪 Testing LST Service")
-#         print("=" * 50)
-        
-#         # Create a larger test geometry (Mumbai area)
-#         test_geometry = {
-#             "type": "Polygon",
-#             "coordinates": [[
-#                 [72.7, 18.9],  # Southwest
-#                 [73.0, 18.9],  # Southeast
-#                 [73.0, 19.2],  # Northeast
-#                 [72.7, 19.2],  # Northwest
-#                 [72.7, 18.9]   # Close polygon
-#             ]]
-#         }
-        
-#         # Create ROI data
-#         roi_data = {
-#             "polygon_geometry": test_geometry,
-#             "geometry_tiles": [],
-#             "is_tiled": False,
-#             "is_fallback": False,
-#             "area_km2": 0
-#         }
-        
-#         print(f"📍 Test geometry: Mumbai area (larger)")
-#         print(f"📅 Date range: 2024-06-01 to 2024-08-31")
-#         print(f"🏙️ UHI analysis: Enabled")
-#         print()
-        
-#         # Test LST analysis
-#         result = LSTService.analyze_lst_with_polygon(
-#             roi_data=roi_data,
-#             start_date="2024-06-01",
-#             end_date="2024-08-31",
-#             include_uhi=True,
-#             include_time_series=False,
-#             scale=1000,
-#             max_pixels=1e6,
-#             exact_computation=False
-#         )
-        
-#         if result.get("success"):
-#             print("✅ LST analysis completed successfully!")
-#             print()
-            
-#             # Display results
-#             lst_stats = result.get("lst_stats", {})
-#             print("🌡️ LST Statistics:")
-#             print(f"   • Mean Temperature: {lst_stats.get('LST_mean', 0):.2f}°C")
-#             print(f"   • Min Temperature: {lst_stats.get('LST_min', 0):.2f}°C")
-#             print(f"   • Max Temperature: {lst_stats.get('LST_max', 0):.2f}°C")
-#             print(f"   • Std Deviation: {lst_stats.get('LST_stdDev', 0):.2f}°C")
-#             print()
-            
-#             uhi_intensity = result.get("uhi_intensity", 0)
-#             uhi_details = result.get("uhi_details", {})
-#             print(f"🏙️ UHI Intensity: {uhi_intensity:.2f}°C")
-            
-#             # Show detailed UHI information
-#             if uhi_details:
-#                 method = uhi_details.get("method", "unknown")
-#                 print(f"   • Method: {method}")
-                
-#                 urban_lst = uhi_details.get("urban_lst")
-#                 rural_lst = uhi_details.get("rural_lst")
-#                 if urban_lst is not None and rural_lst is not None:
-#                     print(f"   • Urban LST: {urban_lst:.2f}°C")
-#                     print(f"   • Rural LST: {rural_lst:.2f}°C")
-                
-#                 urban_pixels = uhi_details.get("urban_pixels", 0)
-#                 rural_pixels = uhi_details.get("rural_pixels", 0)
-#                 urban_percentage = uhi_details.get("urban_percentage", 0)
-#                 print(f"   • Urban pixels: {urban_pixels}")
-#                 print(f"   • Rural pixels: {rural_pixels}")
-#                 print(f"   • Urban coverage: {urban_percentage:.1f}%")
-#             print()
-            
-#             area_km2 = result.get("area_km2", 0)
-#             print(f"📊 Area analyzed: {area_km2:.2f} km²")
-            
-#             image_count = result.get("image_count", 0)
-#             print(f"🛰️ MODIS images used: {image_count}")
-            
-#             # Check if visualization is available
-#             tile_urls = result.get("tile_urls", {})
-#             if tile_urls.get("urlFormat"):
-#                 print(f"🗺️ Visualization: ✅ Available")
-#             else:
-#                 print(f"🗺️ Visualization: ❌ Not available")
-                
-#         else:
-#             print("❌ LST analysis failed!")
-#             error = result.get("error", "Unknown error")
-#             error_type = result.get("error_type", "unknown")
-#             print(f"   Error: {error}")
-#             print(f"   Type: {error_type}")
-            
-#     except ImportError as e:
-#         print(f"❌ Import error: {e}")
-#         print("💡 Make sure you're running from the gee_service directory")
-#     except Exception as e:
-#         print(f"❌ Unexpected error: {e}")
-#         import traceback
-#         print("Full traceback:")
-#         print(traceback.format_exc())
-
-# if __name__ == "__main__":
-#     test_lst_service()
-
-
 """
 Improved test script for LST Service
 
@@ -296,6 +161,51 @@ def test_improved_lst_service():
                     print(f"   • Visualization: ✅ Available")
                 else:
                     print(f"   • Visualization: ❌ Not available")
+                
+                # Display tile URL and legend metadata
+                print(f"\n🔍 DEBUG - Full response keys: {list(result.keys())}")
+                
+                visualization = result.get('visualization', {})
+                print(f"🔍 DEBUG - Visualization keys: {list(visualization.keys())}")
+                
+                legend = visualization.get('legend', {})
+                print(f"🔍 DEBUG - Legend keys: {list(legend.keys()) if legend else 'No legend found'}")
+                
+                if legend:
+                    print(f"\n🎨 Legend Metadata:")
+                    print(f"   Title: {legend.get('title', 'N/A')}")
+                    print(f"   Type: {legend.get('type', 'N/A')}")
+                    print(f"   Description: {legend.get('description', 'N/A')}")
+                    print(f"   Unit: {legend.get('unit', 'N/A')}")
+                    
+                    palette = legend.get('palette', [])
+                    if palette:
+                        print(f"   Color Palette: {len(palette)} colors")
+                        print(f"   Colors: {', '.join(palette[:5])}{'...' if len(palette) > 5 else ''}")
+                    
+                    classes = legend.get('classes', [])
+                    if classes:
+                        print(f"   Classes: {len(classes)} temperature ranges")
+                        print(f"   Class Details:")
+                        for cls in classes:
+                            print(f"     - {cls.get('name', 'Unknown')}: {cls.get('range', 'N/A')} ({cls.get('color', 'N/A')})")
+                else:
+                    print(f"\n🎨 Legend Information: ❌ No legend data found")
+                    print(f"   Available visualization keys: {list(visualization.keys())}")
+                
+                # Display tile URL details
+                tile_url = result.get("urlFormat", "")
+                if tile_url:
+                    print(f"\n🗺️  Tile URL Details:")
+                    print(f"   Complete URL: {tile_url}")
+                    print(f"   ✅ Using new GEE tile URL format (authentication handled internally)")
+                    
+                    # Create a test URL with Mumbai tile coordinates (z=10, x=719, y=456)
+                    test_url = tile_url.replace("{z}", "10").replace("{x}", "719").replace("{y}", "456")
+                    print(f"   Test URL (z=10, x=719, y=456):")
+                    print(f"   {test_url}")
+                else:
+                    print(f"\n🗺️  Tile URL: ❌ Not available")
                 
                 # Show metadata if available
                 metadata = result.get("metadata", {})

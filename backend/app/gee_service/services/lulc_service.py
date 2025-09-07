@@ -71,6 +71,33 @@ class LULCService:
     ]
     
     @staticmethod
+    def _generate_legend_metadata():
+        """
+        Generate legend metadata for Dynamic World land cover classes.
+        Returns structured legend data for frontend rendering.
+        """
+        legend_colors = LULCService.DYNAMIC_WORLD_PALETTE
+        legend_labels = list(LULCService.DYNAMIC_WORLD_CLASSES.values())
+        
+        return {
+            "type": "categorical",
+            "title": "Land Cover Classes",
+            "description": "Dynamic World land use land cover classification",
+            "palette": legend_colors,
+            "min_value": 0,
+            "max_value": 8,
+            "classes": [
+                {
+                    "id": i, 
+                    "name": name, 
+                    "color": color,
+                    "description": f"{name} land cover type"
+                }
+                for i, (name, color) in enumerate(zip(legend_labels, legend_colors))
+            ]
+        }
+
+    @staticmethod
     def _compute_histogram(
         image: ee.Image,
         geometry: ee.Geometry,
@@ -351,6 +378,9 @@ class LULCService:
             # Use proper GEE tile URL format with correct coordinate order {z}/{x}/{y}
             tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             
+            # Generate legend metadata for frontend rendering
+            legend_info = LULCService._generate_legend_metadata()
+            
             # Generate median visualization if requested
             median_tile_url = None
             if include_median_vis and dw_median is not None:
@@ -396,6 +426,8 @@ class LULCService:
             logger.info(f"✅ LULC analysis completed in {processing_time:.2f}s")
             
             # Prepare enriched response
+            logger.info("🔧 Using UPDATED LULC service with metadata-only legend")
+            
             result = {
                 "urlFormat": tile_url,
                 "mapStats": {
@@ -405,7 +437,7 @@ class LULCService:
                     "dominant_class": max(class_percentages.items(), key=lambda x: x[1])[0],
                     "num_classes_detected": len(detected_classes)
                 },
-                "analysis_type": "lulc_dynamic_world",
+                "analysis_type": "lulc_dynamic_world_metadata_legend",
                 "datasets_used": ["GOOGLE/DYNAMICWORLD/V1"],
                 "processing_time_seconds": round(processing_time, 2),
                 "roi_area_km2": round(roi_area_km2, 4),
@@ -415,7 +447,8 @@ class LULCService:
                     "median_tile_url": median_tile_url,
                     "palette": LULCService.DYNAMIC_WORLD_PALETTE,
                     "min": 0,
-                    "max": 8
+                    "max": 8,
+                    "legend": legend_info
                 },
                 "metadata": {
                     "start_date": start_date,
@@ -441,6 +474,10 @@ class LULCService:
                 },
                 "success": True
             }
+            
+            # Debug logging
+            logger.info(f"🔧 DEBUG - Result keys before return: {list(result.keys())}")
+            logger.info(f"🔧 DEBUG - Visualization section: {result.get('visualization', 'MISSING')}")
             
             return result
             

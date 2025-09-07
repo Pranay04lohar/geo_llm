@@ -302,10 +302,17 @@ class LSTService:
                 "success": True,
                 "analysis_type": "lst_analysis",
                 "geometry_type": "single_polygon",
-                "area_km2": polygon_area_km2,
-                "lst_stats": formatted_lst_stats,
-                "uhi_intensity": uhi_intensity,
-                "uhi_details": uhi_details,
+                "roi_area_km2": polygon_area_km2,
+                "urlFormat": tile_urls.get("urlFormat", ""),
+                "mapStats": {
+                    "lst_statistics": formatted_lst_stats,
+                    "uhi_intensity": uhi_intensity,
+                    "uhi_details": uhi_details,
+                    "image_count": image_count
+                },
+                "datasets_used": ["MODIS/061/MOD11A2"],
+                "processing_time_seconds": 0,  # Will be calculated by the calling function
+                "class_definitions": {},
                 "tile_urls": tile_urls,
                 "time_series": time_series_data,
                 "image_count": image_count,
@@ -314,6 +321,28 @@ class LSTService:
                     "palette": LSTService.LST_PALETTE,
                     "breaks": LSTService.LST_BREAKS,
                     "unit": "°C"
+                },
+                "visualization": {
+                    "tile_url": tile_urls.get("urlFormat", ""),
+                    "palette": LSTService.LST_PALETTE,
+                    "min": 20,
+                    "max": 40,
+                    "legend": {
+                        "type": "continuous",
+                        "title": "Land Surface Temperature (LST)",
+                        "description": "Surface temperature in Celsius from MODIS satellite data",
+                        "palette": LSTService.LST_PALETTE,
+                        "min_value": 20,
+                        "max_value": 40,
+                        "unit": "°C",
+                        "classes": [
+                            {"name": "Cool", "range": "(20 to 25)°C", "color": "#2c7bb6", "description": "Cool surface temperatures"},
+                            {"name": "Cool-Moderate", "range": "(25 to 30)°C", "color": "#abd9e9", "description": "Cool-moderate surface temperatures"},
+                            {"name": "Moderate", "range": "(30 to 35)°C", "color": "#ffffbf", "description": "Moderate surface temperatures"},
+                            {"name": "Hot", "range": "(35 to 40)°C", "color": "#fdae61", "description": "Hot surface temperatures"},
+                            {"name": "Extreme", "range": "(40+ °C)", "color": "#d7191c", "description": "Extreme surface temperatures"}
+                        ]
+                    }
                 }
             }
             
@@ -822,7 +851,16 @@ class LSTService:
                 "geometry_type": "tiled_polygon",
                 "tiles_processed": len(tile_results),
                 "total_tiles": len(geometry_tiles),
-                "area_km2": total_area_km2,
+                "roi_area_km2": total_area_km2,
+                "urlFormat": tile_urls.get("urlFormat", ""),
+                "mapStats": {
+                    "lst_statistics": merged_stats,
+                    "tiles_processed": len(tile_results),
+                    "total_tiles": len(geometry_tiles)
+                },
+                "datasets_used": ["MODIS/061/MOD11A2"],
+                "processing_time_seconds": 0,  # Will be calculated by the calling function
+                "class_definitions": {},
                 "merged_stats": merged_stats,
                 "tile_results": tile_results,
                 "tile_urls": tile_urls,
@@ -833,6 +871,28 @@ class LSTService:
                     "palette": LSTService.LST_PALETTE,
                     "breaks": LSTService.LST_BREAKS,
                     "unit": "°C"
+                },
+                "visualization": {
+                    "tile_url": tile_urls.get("urlFormat", ""),
+                    "palette": LSTService.LST_PALETTE,
+                    "min": 20,
+                    "max": 40,
+                    "legend": {
+                        "type": "continuous",
+                        "title": "Land Surface Temperature (LST)",
+                        "description": "Surface temperature in Celsius from MODIS satellite data",
+                        "palette": LSTService.LST_PALETTE,
+                        "min_value": 20,
+                        "max_value": 40,
+                        "unit": "°C",
+                        "classes": [
+                            {"name": "Cool", "range": "(20 to 25)°C", "color": "#2c7bb6", "description": "Cool surface temperatures"},
+                            {"name": "Cool-Moderate", "range": "(25 to 30)°C", "color": "#abd9e9", "description": "Cool-moderate surface temperatures"},
+                            {"name": "Moderate", "range": "(30 to 35)°C", "color": "#ffffbf", "description": "Moderate surface temperatures"},
+                            {"name": "Hot", "range": "(35 to 40)°C", "color": "#fdae61", "description": "Hot surface temperatures"},
+                            {"name": "Extreme", "range": "(40+ °C)", "color": "#d7191c", "description": "Extreme surface temperatures"}
+                        ]
+                    }
                 }
             }
             

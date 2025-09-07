@@ -1169,6 +1169,26 @@ class NDVIService:
                     "dense_vegetation": "Dense vegetation (NDVI > 0.6)"
                 }
                 },
+                "visualization": {
+                    "tile_url": tile_url,
+                    "palette": NDVIService.NDVI_PALETTE,
+                    "min": -0.2,
+                    "max": 0.8,
+                    "legend": {
+                        "type": "continuous",
+                        "title": "NDVI (Normalized Difference Vegetation Index)",
+                        "description": "Vegetation health and density indicator",
+                        "palette": NDVIService.NDVI_PALETTE,
+                        "min_value": -0.2,
+                        "max_value": 0.8,
+                        "classes": [
+                            {"name": "Water/Bare Soil", "range": "(-1.0 to -0.1)", "color": "#d73027", "description": "Water bodies and bare soil areas"},
+                            {"name": "Sparse Vegetation", "range": "(0.1 to 0.3)", "color": "#f46d43", "description": "Sparse vegetation and grasslands"},
+                            {"name": "Moderate Vegetation", "range": "(0.3 to 0.6)", "color": "#fdae61", "description": "Moderate vegetation coverage"},
+                            {"name": "Dense Vegetation", "range": "(0.6 to 1.0)", "color": "#1a9850", "description": "Dense forests and vegetation"}
+                        ]
+                    }
+                },
                 
                 "metadata": {
                     "start_date": start_date,
