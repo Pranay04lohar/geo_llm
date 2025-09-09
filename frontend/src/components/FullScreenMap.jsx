@@ -457,7 +457,7 @@ function FullScreenMap({ roiData, onClose, onExport }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-gray-800">Interactive Map</h1>
-            <div className="flex items-center gap-2">
+            <div data-tour-target="map-layers" className="flex items-center gap-2">
               <button
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   mapStyle === "map"
@@ -483,6 +483,7 @@ function FullScreenMap({ roiData, onClose, onExport }) {
           
           <div className="flex items-center gap-3">
             <button
+              data-tour-target="drawing-tools"
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 isDrawing
                   ? "bg-orange-500 text-white"
@@ -516,7 +517,7 @@ function FullScreenMap({ roiData, onClose, onExport }) {
       </div>
 
       {/* Google Maps-style Zoom Controls */}
-      <div className="absolute top-20 right-4 z-10 flex flex-col gap-2">
+      <div data-tour-target="map-navigation" className="absolute top-20 right-4 z-10 flex flex-col gap-2">
         <button
           className="w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-50 transition-all"
           onClick={zoomIn}
@@ -546,7 +547,7 @@ function FullScreenMap({ roiData, onClose, onExport }) {
 
       {/* ROI List */}
       {roiList.length > 0 && (
-        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg p-4 max-w-sm max-h-64 overflow-y-auto">
+        <div data-tour-target="roi-management" className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg p-4 max-w-sm max-h-64 overflow-y-auto">
           <h3 className="font-semibold text-gray-800 mb-2">Active ROIs ({roiList.length})</h3>
           {roiList.map((roi) => (
             <div key={roi.id} className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded">

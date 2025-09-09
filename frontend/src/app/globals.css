@@ -193,3 +193,37 @@ textarea:focus-visible {
 .animate-fade-in-up {
   animation: fadeInUp 0.5s ease-out;
 }
+
+/* Tour spotlight effect */
+.tour-spotlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
+    transparent 0px,
+    transparent 200px,
+    rgba(0, 0, 0, 0.8) 300px
+  );
+  pointer-events: none;
+}
+
+/* Tour target highlighting */
+#prompt-input.tour-highlight,
+#file-upload.tour-highlight,
+#mini-map.tour-highlight {
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5);
+  border-radius: 8px;
+  animation: tour-pulse 2s infinite;
+}
+
+@keyframes tour-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0.3);
+  }
+}

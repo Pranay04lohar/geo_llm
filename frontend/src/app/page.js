@@ -21,12 +21,17 @@ export default function Home() {
   const messagesEndRef = useRef(null)
   const [showFullScreen, setShowFullScreen] = useState(false)
   const [roiData, setRoiData] = useState([])
+  const [showTour, setShowTour] = useState(false)
+  const [currentStep, setCurrentStep] = useState(0)
+  const [tourStarted, setTourStarted] = useState(false)
+  const [showChecklist, setShowChecklist] = useState(false)
 
   // Load from localStorage after hydration
   useEffect(() => {
     const savedLeft = localStorage.getItem('geollm-left-sidebar-collapsed')
     const savedRight = localStorage.getItem('geollm-right-sidebar-collapsed')
     const savedMessages = localStorage.getItem('geollm-chat-messages')
+    const savedTourCompleted = localStorage.getItem('geollm-tour-completed')
     
     if (savedLeft !== null) {
       setLeftCollapsed(JSON.parse(savedLeft))
@@ -36,6 +41,13 @@ export default function Home() {
     }
     if (savedMessages !== null) {
       setMessages(JSON.parse(savedMessages))
+    }
+    if (savedTourCompleted === null) {
+      // Show tour for first-time users
+      setTimeout(() => {
+        setShowTour(true)
+        setShowChecklist(true)
+      }, 1000)
     }
     
     setIsHydrated(true)
@@ -83,6 +95,82 @@ export default function Home() {
 
   const FINAL_TEXT = `GeoLLM Response:\nAfter analyzing the provided geospatial dataset and applying spatial clustering techniques, we can conclude that the region around central India exhibits a high population density in urban areas while large portions of the surrounding terrain remain sparsely populated.\nThe clustering algorithm used (DBSCAN) successfully identified several major population centers such as Delhi, Mumbai, and Bengaluru as high-density clusters. The analysis also revealed natural geographical barriers like mountain ranges and rivers which act as separators between clusters.\nBased on the spatial distribution patterns, future urban expansion is likely to occur along major transportation corridors and river basins due to economic activities concentrating in these zones.`
 
+  // Tour steps configuration
+  const tourSteps = [
+    {
+      id: 'welcome',
+      title: 'Welcome to GeoLLM! 🌍',
+      description: 'Your AI-powered geospatial analysis platform. Let\'s explore the key features together.',
+      selector: null,
+      page: 'home',
+      completed: false
+    },
+    {
+      id: 'prompt-input',
+      title: 'Ask Geography Questions',
+      description: 'Type your spatial queries here. Ask about boundaries, population data, or any geospatial analysis.',
+      selector: '#prompt-input',
+      page: 'home',
+      completed: false
+    },
+    {
+      id: 'file-upload',
+      title: 'Upload Spatial Data',
+      description: 'Upload GeoJSON, SHP, or TIFF files to analyze your own spatial datasets.',
+      selector: '#file-upload',
+      page: 'home',
+      completed: false
+    },
+    {
+      id: 'mini-map',
+      title: 'Mini Map Preview',
+      description: 'This mini map gives you a quick preview of your selected region. Click to open the full map.',
+      selector: '#mini-map',
+      page: 'home',
+      completed: false
+    },
+    {
+      id: 'full-screen-map',
+      title: 'Full Screen Map',
+      description: 'Let\'s explore the interactive map where you can perform detailed geospatial analysis.',
+      selector: '#full-screen-map',
+      page: 'map',
+      completed: false
+    },
+    {
+      id: 'map-layers',
+      title: 'Map Layers & Modes',
+      description: 'Switch between Satellite, Street Map, and other layer types to view different perspectives.',
+      selector: '#map-layers',
+      page: 'map',
+      completed: false
+    },
+    {
+      id: 'drawing-tools',
+      title: 'Drawing Tools',
+      description: 'Draw regions of interest (ROI) and annotate the map with custom boundaries.',
+      selector: '#drawing-tools',
+      page: 'map',
+      completed: false
+    },
+    {
+      id: 'roi-management',
+      title: 'ROI Management',
+      description: 'Manage your regions of interest - rename, delete, or export them for analysis.',
+      selector: '#roi-management',
+      page: 'map',
+      completed: false
+    },
+    {
+      id: 'completion',
+      title: '🎉 You\'re All Set!',
+      description: 'You\'re ready to explore advanced geospatial analysis with GeoLLM. Start asking questions or upload your data!',
+      selector: null,
+      page: 'map',
+      completed: false
+    }
+  ]
+
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
@@ -113,6 +201,97 @@ export default function Home() {
       localStorage.removeItem('geollm-chat-messages')
     }
   }
+
+  // Tour management functions
+  const startTour = () => {
+    setShowTour(true)
+    setShowChecklist(true)
+    setCurrentStep(0)
+    setTourStarted(true)
+  }
+
+  const nextStep = () => {
+    const nextStepIndex = currentStep + 1
+    if (nextStepIndex < tourSteps.length) {
+      // Mark current step as completed
+      tourSteps[currentStep].completed = true
+      setCurrentStep(nextStepIndex)
+      
+      // Navigate to map page when reaching map-related steps
+      if (tourSteps[nextStepIndex].page === 'map' && !showFullScreen) {
+        setShowFullScreen(true)
+      }
+    } else {
+      finishTour()
+    }
+  }
+
+  const prevStep = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1)
+      
+      // Navigate back to home page if needed
+      if (tourSteps[currentStep - 1].page === 'home' && showFullScreen) {
+        setShowFullScreen(false)
+      }
+    }
+  }
+
+  const skipTour = () => {
+    finishTour()
+  }
+
+  const finishTour = () => {
+    setShowTour(false)
+    setShowChecklist(false)
+    setCurrentStep(0)
+    setTourStarted(false)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('geollm-tour-completed', 'true')
+    }
+  }
+
+  const jumpToStep = (stepIndex) => {
+    if (stepIndex >= 0 && stepIndex < tourSteps.length) {
+      setCurrentStep(stepIndex)
+      
+      // Navigate to appropriate page
+      if (tourSteps[stepIndex].page === 'map' && !showFullScreen) {
+        setShowFullScreen(true)
+      } else if (tourSteps[stepIndex].page === 'home' && showFullScreen) {
+        setShowFullScreen(false)
+      }
+    }
+  }
+
+  const getCurrentStepData = () => {
+    return tourSteps[currentStep] || tourSteps[0]
+  }
+
+  // Highlight current tour target
+  useEffect(() => {
+    if (!showTour) return
+
+    const currentStepData = getCurrentStepData()
+    if (!currentStepData.selector) return
+
+    // Remove previous highlights
+    document.querySelectorAll('.tour-highlight').forEach(el => {
+      el.classList.remove('tour-highlight')
+    })
+
+    // Add highlight to current target
+    const targetElement = document.querySelector(currentStepData.selector)
+    if (targetElement) {
+      targetElement.classList.add('tour-highlight')
+    }
+
+    return () => {
+      document.querySelectorAll('.tour-highlight').forEach(el => {
+        el.classList.remove('tour-highlight')
+      })
+    }
+  }, [showTour, currentStep])
 
   // Don't render until hydrated to prevent hydration mismatch
   if (!isHydrated) {
@@ -248,11 +427,19 @@ export default function Home() {
             {/* Chat Header */}
             <div className="bg-black/40 backdrop-blur-xl p-4 shadow-2xl border-b border-white/10">
               <div className="flex items-center justify-between relative">
-                {/* Left: Get Plus Button */}
-                <div className="flex-shrink-0">
+                {/* Left: Get Plus Button and Tour Button */}
+                <div className="flex-shrink-0 flex items-center gap-3">
                   <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105">
                     Get Plus
                   </button>
+                  {!tourStarted && (
+                    <button 
+                      onClick={startTour}
+                      className="bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105"
+                    >
+                      Take a Quick Tour
+                    </button>
+                  )}
                 </div>
                 
                 {/* Center: Title */}
@@ -337,6 +524,7 @@ export default function Home() {
                 <div className="w-full max-w-6xl">
                   <div className="relative">
                     <textarea 
+                      id="prompt-input"
                       placeholder="Ask anything about geography, boundaries, or spatial data..."
                       aria-label="Prompt input"
                       value={prompt}
@@ -347,7 +535,10 @@ export default function Home() {
                     />
                     <div className="absolute right-6 bottom-6 flex items-center gap-4">
                     {/* Upload Button in Chat */}
-                    <label className="text-white/80 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10 cursor-pointer">
+                    <label 
+                      id="file-upload"
+                      className="text-white/80 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10 cursor-pointer"
+                    >
                       <input
                         type="file"
                         accept=".geojson,.json,.shp,.zip,.tif,.tiff"
@@ -483,7 +674,11 @@ export default function Home() {
             </div>
           </div>
           <div className="p-6">
-            <div className="bg-white/8 rounded-3xl overflow-hidden border border-white/15" style={{ minHeight: '180px' }}>
+            <div 
+              id="mini-map"
+              className="bg-white/8 rounded-3xl overflow-hidden border border-white/15" 
+              style={{ minHeight: '180px' }}
+            >
               <MiniMap embedded onOpenFullScreen={() => setShowFullScreen(true)} />
             </div>
           </div>
@@ -498,6 +693,145 @@ export default function Home() {
               setShowFullScreen(false)
             }}
           />
+        )}
+
+        {/* Tour Overlay */}
+        {showTour && (
+          <div className="fixed inset-0 z-50 pointer-events-none">
+            {/* Subtle backdrop - no blur */}
+            <div className="absolute inset-0 bg-black/20" />
+            
+            {/* Tooltip positioned near target element or center for welcome */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
+              <div className="max-w-md mx-4 bg-white rounded-2xl shadow-2xl p-6 animate-fade-in-up border-2 border-blue-500">
+                <div className="text-center">
+                  <h3 className="text-xl font-bold text-gray-800 mb-3">
+                    {getCurrentStepData().title}
+                  </h3>
+                  <p className="text-gray-600 mb-6 leading-relaxed">
+                    {getCurrentStepData().description}
+                  </p>
+                  
+                  {/* Navigation buttons in tooltip */}
+                  <div className="flex justify-between items-center">
+                    <button
+                      onClick={prevStep}
+                      disabled={currentStep === 0}
+                      className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ← Back
+                    </button>
+                    
+                    <button
+                      onClick={nextStep}
+                      className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-6 py-2 rounded-lg font-medium hover:shadow-lg transition-all"
+                    >
+                      {currentStep === tourSteps.length - 1 ? 'Finish' : 'Next →'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Floating Checklist Panel */}
+        {showChecklist && (
+          <div className="fixed bottom-6 left-6 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-sm animate-fade-in-up border-2 border-blue-500">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-800">Quick Tour</h3>
+              <button
+                onClick={skipTour}
+                className="text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Progress bar */}
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 mb-2">
+                <span>Step {currentStep + 1} of {tourSteps.length}</span>
+                <span>{Math.round(((currentStep + 1) / tourSteps.length) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-gradient-to-r from-blue-600 to-cyan-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${((currentStep + 1) / tourSteps.length) * 100}%` }}
+                />
+              </div>
+            </div>
+            
+            {/* Current step info */}
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <h4 className="font-semibold text-blue-800 text-sm mb-1">
+                {getCurrentStepData().title}
+              </h4>
+              <p className="text-blue-600 text-xs">
+                {getCurrentStepData().description}
+              </p>
+            </div>
+            
+            {/* Checklist */}
+            <div className="space-y-2 mb-6 max-h-32 overflow-y-auto">
+              {tourSteps.map((step, index) => (
+                <div
+                  key={step.id}
+                  className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all ${
+                    index === currentStep
+                      ? 'bg-blue-50 border border-blue-200'
+                      : step.completed
+                      ? 'bg-green-50'
+                      : 'hover:bg-gray-50'
+                  }`}
+                  onClick={() => jumpToStep(index)}
+                >
+                  <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                    step.completed
+                      ? 'bg-green-500 text-white'
+                      : index === currentStep
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-300'
+                  }`}>
+                    {step.completed ? (
+                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : index === currentStep ? (
+                      <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                    ) : null}
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-xs font-medium ${
+                      index === currentStep ? 'text-blue-800' : 'text-gray-700'
+                    }`}>
+                      {step.title}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {/* Action buttons */}
+            <div className="flex justify-between items-center">
+              <button
+                onClick={prevStep}
+                disabled={currentStep === 0}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                ← Back
+              </button>
+              
+              <button
+                onClick={nextStep}
+                className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-6 py-2 rounded-lg font-medium hover:shadow-lg transition-all text-sm"
+              >
+                {currentStep === tourSteps.length - 1 ? 'Finish' : 'Next →'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
