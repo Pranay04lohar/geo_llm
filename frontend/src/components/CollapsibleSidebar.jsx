@@ -1,8 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export default function CollapsibleSidebar({ children, isCollapsed, onToggle, position = 'left' }) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  // Prevent hydration mismatch by not rendering until mounted
+  if (!mounted) {
+    return (
+      <div className={`transition-all duration-300 ease-in-out ${
+        position === 'left' ? 'w-80' : 'w-96'
+      }`}>
+        <div className="h-full bg-black/40 backdrop-blur-xl flex flex-col relative shadow-2xl border-r border-white/10">
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={`transition-all duration-300 ease-in-out ${
       position === 'left' 

@@ -3,11 +3,16 @@
 import { useEffect, useRef, memo } from 'react'
 import * as THREE from 'three'
 
-const AnimatedEarth = memo(() => {
+const AnimatedEarth = memo(({ rotationSpeed = 0.002 }) => {
   const mountRef = useRef(null)
   const sceneRef = useRef(null)
   const rendererRef = useRef(null)
   const animationIdRef = useRef(null)
+  const rotationRef = useRef(rotationSpeed)
+
+  useEffect(() => {
+    rotationRef.current = rotationSpeed
+  }, [rotationSpeed])
 
   // Function to create round star texture
   const createStarTexture = () => {
@@ -128,8 +133,9 @@ const AnimatedEarth = memo(() => {
     const animate = () => {
       animationIdRef.current = requestAnimationFrame(animate)
       
-      earth.rotation.y += 0.002
-      stars.rotation.y += 0.001
+      const speed = rotationRef.current
+      earth.rotation.y += speed
+      stars.rotation.y += speed * 0.5
       
       renderer.render(scene, camera)
     }

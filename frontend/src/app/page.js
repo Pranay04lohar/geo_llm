@@ -1,25 +1,39 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import AnimatedEarth from '@/components/AnimatedEarth'
 import CollapsibleSidebar from '@/components/CollapsibleSidebar'
+import MapView from '@/components/MapView'
+import MiniMap from '@/components/MiniMap'
+import FullScreenMap from '@/components/FullScreenMap'
 
 export default function Home() {
-  const [leftCollapsed, setLeftCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('geollm-left-sidebar-collapsed')
-      return saved ? JSON.parse(saved) : true // Default to collapsed
+  const [leftCollapsed, setLeftCollapsed] = useState(true) // Default to collapsed
+  const [rightCollapsed, setRightCollapsed] = useState(true) // Deprecated: right panel removed
+  const [isHydrated, setIsHydrated] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [result, setResult] = useState('')
+  const [earthSpeed, setEarthSpeed] = useState(0.002)
+  const [cotLines, setCotLines] = useState([])
+  const cotTimersRef = useRef([])
+  const [showFullScreen, setShowFullScreen] = useState(false)
+  const [roiData, setRoiData] = useState([])
+
+  // Load from localStorage after hydration
+  useEffect(() => {
+    const savedLeft = localStorage.getItem('geollm-left-sidebar-collapsed')
+    const savedRight = localStorage.getItem('geollm-right-sidebar-collapsed')
+    
+    if (savedLeft !== null) {
+      setLeftCollapsed(JSON.parse(savedLeft))
     }
-    return true
-  })
-  
-  const [rightCollapsed, setRightCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('geollm-right-sidebar-collapsed')
-      return saved ? JSON.parse(saved) : true // Default to collapsed
+    if (savedRight !== null) {
+      setRightCollapsed(JSON.parse(savedRight))
     }
-    return true
-  })
+    
+    setIsHydrated(true)
+  }, [])
 
   // Save state to localStorage whenever it changes
   const updateLeftCollapsed = (collapsed) => {
@@ -37,7 +51,56 @@ export default function Home() {
   }
 
   // Memoize the Earth component to prevent re-renders
-  const earthComponent = useMemo(() => <AnimatedEarth />, [])
+  const earthComponent = useMemo(() => <AnimatedEarth rotationSpeed={earthSpeed} />, [earthSpeed])
+
+  // Hardcoded CoT script and final result text
+  const COT_SCRIPT = [
+    'Chain-of-Thought (CoT) Simulation:',
+    'Initializing geospatial reasoning chain...',
+    '',
+    'Step 1: Parsing the uploaded GeoJSON boundary data.',
+    'Step 2: Verifying CRS consistency across datasets.',
+    'Step 3: Preprocessing population dataset – removing invalid features and empty geometries.',
+    'Step 4: Performing spatial join to link population points with administrative boundaries.',
+    'Step 5: Executing clustering algorithm (DBSCAN) to detect population centers.',
+    'Step 6: Visualizing population clusters using color-coded boundaries and heatmaps.',
+    '',
+    'Sample Analytical Thought Process:',
+    'Let us begin by understanding the key geospatial inputs provided by the user. First, the boundary file specifies the coordinates of administrative regions which we need to parse. Next, the population dataset includes spatial coordinates with associated demographic data.',
+    'The next logical step is to preprocess these datasets by ensuring coordinate reference system (CRS) compatibility, removing invalid geometries, and handling missing data.',
+    'Once data is preprocessed, a spatial join operation will associate population data points with their corresponding administrative regions.',
+    'We will then apply clustering algorithms, such as K-Means or DBSCAN, to group spatial points based on density and proximity.',
+    'Finally, after identifying spatial clusters, we will perform statistical summarization of population density, highlight outlier regions, and visualize the clusters on the map.',
+    '',
+    'Generating result output...'
+  ]
+
+  const FINAL_TEXT = `GeoLLM Response:\nAfter analyzing the provided geospatial dataset and applying spatial clustering techniques, we can conclude that the region around central India exhibits a high population density in urban areas while large portions of the surrounding terrain remain sparsely populated.\nThe clustering algorithm used (DBSCAN) successfully identified several major population centers such as Delhi, Mumbai, and Bengaluru as high-density clusters. The analysis also revealed natural geographical barriers like mountain ranges and rivers which act as separators between clusters.\nBased on the spatial distribution patterns, future urban expansion is likely to occur along major transportation corridors and river basins due to economic activities concentrating in these zones.`
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      cotTimersRef.current.forEach((id) => clearTimeout(id))
+      cotTimersRef.current = []
+    }
+  }, [])
+
+  // Don't render until hydrated to prevent hydration mismatch
+  if (!isHydrated) {
+    return (
+      <div className="relative min-h-screen bg-black overflow-hidden">
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          {earthComponent}
+        </div>
+        <div className="relative z-10 flex h-screen items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-white/60">Loading...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative min-h-screen bg-black overflow-hidden">
@@ -182,32 +245,134 @@ export default function Home() {
             
             {/* Chat Messages - Centered Welcome */}
             <div className="flex-1 overflow-y-auto flex items-center justify-center p-8">
-              <div className="text-center max-w-2xl relative z-20 ml-16">
-                <div className="text-white font-medium text-5xl mb-6 leading-tight">
-                  What&apos;s on your mind today?
-                </div>
-                <div className="text-white/70 text-lg font-bold max-w-lg mx-auto leading-relaxed">
-                  Ask me anything about geography, boundaries, or spatial data analysis
-                </div>
+              <div className="text-center max-w-2xl relative z-20 ml-16 w-full">
+                {!isProcessing && !result && (
+                  <>
+                    <div className="text-white font-medium text-5xl mb-6 leading-tight">
+                      What&apos;s on your mind today?
+                    </div>
+                    <div className="text-white/70 text-lg font-bold max-w-lg mx-auto leading-relaxed">
+                      Ask me anything about geography, boundaries, or spatial data analysis
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             
-            {/* Floating Chat Input - Bottom Center */}
-            <div className="p-8 flex justify-center">
-              <div className="w-full max-w-4xl">
-                <div className="relative">
-                  <textarea 
-                    placeholder="Ask anything about geography, boundaries, or spatial data..."
-                    className="w-full bg-black/50 rounded-3xl px-8 py-5 pr-20 text-white placeholder-white/60 focus:outline-none focus:bg-black/60 focus:shadow-xl resize-none shadow-xl transition-all duration-200 border border-white/10 focus:border-white/20 text-base"
-                    rows={3}
-                  />
-                  <div className="absolute right-6 bottom-6 flex items-center gap-4">
-                    <button className="text-white/60 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10">
+            {/* Chat Input and CoT Container */}
+            <div className="flex flex-col p-8">
+              {/* Chain-of-Thought Animation Container */}
+              <div className={`transition-all duration-500 overflow-hidden ${isProcessing ? 'max-h-screen opacity-100 mb-5' : 'max-h-0 opacity-0 mb-0'}`}>
+                <div className="flex flex-col items-center gap-4 w-full" role="status" aria-live="polite">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                  <div className="text-white/80 text-base font-medium tracking-wide">
+                    Thinking<span className="inline-block animate-pulse">...</span>
+                  </div>
+                  <div className="w-full max-w-4xl text-left bg-black/40 border border-white/10 rounded-xl p-4">
+                    {cotLines.map((line, i) => (
+                      <div key={i} className="text-white/80 text-sm mb-1 whitespace-pre-wrap">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Result Display */}
+              {!isProcessing && result && (
+                <div className="mb-5 bg-white/10 border border-white/15 rounded-2xl p-5 text-left text-white/90 shadow-xl transition-all whitespace-pre-wrap">
+                  {result}
+                </div>
+              )}
+
+              {/* Chat Input Area */}
+              <div className="flex justify-center">
+                <div className="w-full max-w-4xl">
+                  <div className="relative">
+                    <textarea 
+                      placeholder="Ask anything about geography, boundaries, or spatial data..."
+                      aria-label="Prompt input"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      disabled={isProcessing}
+                      className="w-full bg-black/50 rounded-3xl px-8 py-5 pr-28 text-white placeholder-white/60 focus:outline-none focus:bg-black/60 focus:shadow-xl resize-none shadow-xl transition-all duration-200 border border-white/10 focus:border-white/20 text-base"
+                      rows={3}
+                    />
+                    <div className="absolute right-6 bottom-6 flex items-center gap-4">
+                    {/* Upload Button in Chat */}
+                    <label className="text-white/80 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10 cursor-pointer">
+                      <input
+                        type="file"
+                        accept=".geojson,.json,.shp,.zip,.tif,.tiff"
+                        className="hidden"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0]
+                          if (!file) return
+                          const name = file.name.toLowerCase()
+                          try {
+                            if (name.endsWith('.geojson') || name.endsWith('.json')) {
+                              const text = await file.text()
+                              const data = JSON.parse(text)
+                              const fc = data.type === 'FeatureCollection' ? data : { type: 'FeatureCollection', features: [data] }
+                              setRoiData((prev) => {
+                                const base = prev.length
+                                const newItems = fc.features.map((feat, idx) => ({
+                                  id: `roi-${base + idx + 1}`,
+                                  name: feat.properties?.name || `ROI ${base + idx + 1}`,
+                                  geojson: feat,
+                                  color: '#3498db',
+                                }))
+                                return [...prev, ...newItems]
+                              })
+                              setShowFullScreen(true)
+                            } else if (name.endsWith('.tif') || name.endsWith('.tiff')) {
+                              alert('TIFF upload is not yet supported in the frontend. Consider server-side processing.')
+                            } else if (name.endsWith('.shp') || name.endsWith('.zip')) {
+                              alert('Shapefile upload is not yet supported in the frontend. Please convert to GeoJSON.')
+                            } else {
+                              alert('Unsupported file type. Please upload GeoJSON.')
+                            }
+                          } catch (e) {
+                            alert('Failed to read file. Ensure it is valid GeoJSON.')
+                          } finally {
+                            event.target.value = ''
+                          }
+                        }}
+                      />
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
+                      </svg>
+                    </label>
+                    <button className="text-white/60 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10" aria-label="Microphone">
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                       </svg>
                     </button>
-                    <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl p-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110">
+                    <button
+                      className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl p-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 disabled:opacity-60"
+                      aria-label="Send prompt"
+                      disabled={isProcessing || !prompt.trim()}
+                      onClick={async () => {
+                        if (!prompt.trim()) return
+                        setIsProcessing(true)
+                        setEarthSpeed(0.0005)
+                        setResult('')
+                        setCotLines([])
+                        // progressively reveal CoT lines
+                        COT_SCRIPT.forEach((line, idx) => {
+                          const id = setTimeout(() => {
+                            setCotLines((prev) => [...prev, line])
+                          }, 300 * idx)
+                          cotTimersRef.current.push(id)
+                        })
+                        // simulate backend delay ~5s
+                        await new Promise((res) => setTimeout(res, 5000))
+                        setResult(FINAL_TEXT)
+                        setPrompt('')
+                        setIsProcessing(false)
+                        setEarthSpeed(0.002)
+                      }}
+                    >
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                       </svg>
@@ -224,20 +389,20 @@ export default function Home() {
                 </div>
               </div>
             </div>
+            </div>
           </div>
         </div>
         
-        {/* Right Panel - Interactive Map Tools */}
-                 <CollapsibleSidebar 
-           isCollapsed={rightCollapsed} 
-           onToggle={() => updateRightCollapsed(!rightCollapsed)}
-           position="right"
-         >
-          {/* Map Header */}
+        {/* Right Panel - Interactive Map Tools with MiniMap */}
+        <CollapsibleSidebar 
+          isCollapsed={rightCollapsed} 
+          onToggle={() => updateRightCollapsed(!rightCollapsed)}
+          position="right"
+        >
           <div className="p-6 border-b border-white/10">
             <div className="flex items-center justify-between">
-              <h2 className="text-white font-bold text-xl">Interactive Map</h2>
-                                           <button 
+              <h2 className="text-white font-bold text-xl">Map</h2>
+              <button 
                 onClick={() => updateRightCollapsed(!rightCollapsed)}
                 className="w-12 h-12 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-200 cursor-pointer border border-blue-500/30 hover:shadow-xl hover:scale-105"
               >
@@ -247,73 +412,23 @@ export default function Home() {
               </button>
             </div>
           </div>
-          
-          {/* Map Toolbar - Stacked in Rounded Buttons */}
           <div className="p-6">
-            <div className="space-y-4">
-              {/* Drawing Tools */}
-              <div className="space-y-3">
-                <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Drawing Tools</div>
-                <div className="flex gap-3">
-                  <button className="flex-1 bg-white/10 text-white rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 border border-white/15">
-                    Draw ROI
-                  </button>
-                  <button className="flex-1 bg-white/10 text-white rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 border border-white/15">
-                    Select
-                  </button>
-                </div>
-              </div>
-              
-              {/* Navigation Tools */}
-              <div className="space-y-3">
-                <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Navigation</div>
-                <div className="flex gap-3">
-                  <button className="flex-1 bg-white/10 text-white rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 border border-white/15">
-                    Zoom In
-                  </button>
-                  <button className="flex-1 bg-white/10 text-white rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 border border-white/15">
-                    Reset
-                  </button>
-                </div>
-              </div>
-              
-              {/* Map Mode Toggle */}
-              <div className="space-y-3">
-                <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Map Mode</div>
-                <div className="flex gap-3">
-                  <button className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-4 py-3 text-sm font-medium shadow-lg hover:shadow-xl hover:scale-105 border border-blue-500/30 transition-all duration-200">
-                    Satellite
-                  </button>
-                  <button className="flex-1 bg-white/10 text-white rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 border border-white/15">
-                    Street
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Map Container */}
-          <div className="flex-1 p-6">
-            <div className="bg-white/8 rounded-3xl h-full flex items-center justify-center shadow-lg border border-white/15 transition-all duration-200">
-              <div className="text-center">
-                <svg className="w-20 h-20 text-white/40 mx-auto mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
-                </svg>
-                <p className="text-white/70 text-base font-medium">Map visualization will appear here</p>
-              </div>
-            </div>
-          </div>
-          
-          {/* Map Info - Styled Containers */}
-          <div className="p-6 space-y-4 border-t border-white/10">
-            <div className="bg-white/8 rounded-2xl p-4 shadow-lg border border-white/15 transition-all duration-200">
-              <p className="text-white/90 text-sm font-medium">Selected Region: <span className="text-blue-400 font-semibold">None</span></p>
-            </div>
-            <div className="bg-white/8 rounded-2xl p-4 shadow-lg border border-white/15 transition-all duration-200">
-              <p className="text-white/90 text-sm font-medium">Boundary Type: <span className="text-green-400 font-semibold">Administrative</span></p>
+            <div className="bg-white/8 rounded-3xl overflow-hidden border border-white/15" style={{ minHeight: '180px' }}>
+              <MiniMap embedded onOpenFullScreen={() => setShowFullScreen(true)} />
             </div>
           </div>
         </CollapsibleSidebar>
+
+        {showFullScreen && (
+          <FullScreenMap
+            roiData={roiData}
+            onClose={() => setShowFullScreen(false)}
+            onExport={(data) => {
+              setRoiData(data)
+              setShowFullScreen(false)
+            }}
+          />
+        )}
       </div>
     </div>
   )
