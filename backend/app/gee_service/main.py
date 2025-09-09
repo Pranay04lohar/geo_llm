@@ -106,6 +106,20 @@ class LSTRequest(GEERequest):
     includeTimeSeries: bool = False
     exactComputation: bool = False
 
+class WaterRequest(BaseModel):
+    """Water analysis request parameters"""
+    roi: Dict[str, Any]  # Region of interest (Polygon or Point)
+    year: int = None  # Year for analysis (default: current year)
+    threshold: int = 20  # Water occurrence threshold (default: 20%)
+    include_seasonal: bool = True  # Include seasonal analysis
+
+class WaterChangeRequest(BaseModel):
+    """Water change analysis request parameters"""
+    roi: Dict[str, Any]  # Region of interest
+    start_year: int  # Start year for comparison
+    end_year: int  # End year for comparison
+    threshold: int = 20  # Water occurrence threshold
+
 class TileResponse(BaseModel):
     """Response model for tile-based analysis"""
     urlFormat: str
@@ -145,6 +159,11 @@ async def root():
             "/health",
             "/lulc/dynamic-world",
             "/ndvi/vegetation-analysis",
+            "/lst/land-surface-temperature",
+            "/lst/urban-heat-island",
+            "/water/analyze",
+            "/water/change",
+            "/water/quality",
             "/docs"
         ]
     }
@@ -170,6 +189,23 @@ try:
             @staticmethod
             def analyze_ndvi(**kwargs):
                 raise Exception(f"NDVIService import failed: {ndvi_import_error}")
+    
+    # Try to import WaterService
+    try:
+        from services.water_service import WaterService
+        logger.info("✅ Successfully imported WaterService")
+    except Exception as water_import_error:
+        logger.error(f"❌ Failed to import WaterService: {water_import_error}")
+        logger.error(f"❌ Error type: {type(water_import_error)}")
+        import traceback
+        logger.error(f"❌ Import traceback:")
+        logger.error(traceback.format_exc())
+        
+        # Create a dummy service so the app can still start
+        class WaterService:
+            @staticmethod
+            def analyze_water_presence(**kwargs):
+                raise Exception(f"WaterService import failed: {water_import_error}")
         
 except ImportError as general_import_error:
     logger.error(f"❌ General import error: {general_import_error}")
@@ -189,6 +225,17 @@ except ImportError as general_import_error:
             @staticmethod
             def analyze_ndvi(**kwargs):
                 raise Exception(f"NDVIService fallback import failed: {fallback_error}")
+    
+    try:
+        from services.water_service import WaterService
+        logger.info("✅ Successfully imported WaterService via fallback")
+    except Exception as water_fallback_error:
+        logger.error(f"❌ WaterService fallback import also failed: {water_fallback_error}")
+        
+        class WaterService:
+            @staticmethod
+            def analyze_water_presence(**kwargs):
+                raise Exception(f"WaterService fallback import failed: {water_fallback_error}")
 
 @app.post("/lulc/dynamic-world", response_model=TileResponse)
 async def analyze_lulc_dynamic_world(request: LULCRequest):
@@ -500,4 +547,148 @@ async def analyze_uhi(request: LSTRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {type(e).__name__}: {str(e)}"
+        )
+
+@app.post("/water/analyze")
+async def analyze_water_presence(request: WaterRequest):
+    """
+    Analyze water presence using JRC Global Surface Water dataset
+    
+    Features:
+    - JRC Global Surface Water occurrence analysis
+    - Seasonal water analysis (monsoon vs dry season)
+    - Fast frequency histogram processing
+    - Tile URLs for immediate map rendering
+    - ROI clipping for performance
+    
+    Returns:
+    - Tile URL for water visualization
+    - Water percentage statistics
+    - Seasonal comparison data
+    - Processing metadata
+    """
+    if not GEE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Earth Engine not available"
+        )
+    
+    if not gee_initialized:
+        raise HTTPException(
+            status_code=503, 
+            detail="GEE client not initialized"
+        )
+    
+    logger.info(f"🌊 Starting water analysis for ROI: {request.roi.get('type', 'Unknown')}")
+    
+    try:
+        # Create water service instance and call the method
+        water_service = WaterService()
+        result = water_service.analyze_water_presence(
+            roi=request.roi,
+            year=request.year,
+            threshold=request.threshold,
+            include_seasonal=request.include_seasonal
+        )
+        
+        if "error" in result:
+            raise HTTPException(
+                status_code=500,
+                detail=result["error"]
+            )
+        
+        logger.info(f"✅ Water analysis completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in water analysis endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.post("/water/change")
+async def analyze_water_change(request: WaterChangeRequest):
+    """
+    Analyze water change between two time periods
+    
+    Features:
+    - Water change detection between years
+    - JRC Global Surface Water dataset
+    - Change percentage and direction analysis
+    - Tile URLs for visualization
+    
+    Returns:
+    - Tile URL for change visualization
+    - Change analysis statistics
+    - Processing metadata
+    """
+    if not GEE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Earth Engine not available"
+        )
+    
+    if not gee_initialized:
+        raise HTTPException(
+            status_code=503, 
+            detail="GEE client not initialized"
+        )
+    
+    logger.info(f"🌊 Starting water change analysis: {request.start_year} - {request.end_year}")
+    
+    try:
+        # Create water service instance and call the method
+        water_service = WaterService()
+        result = water_service.analyze_water_change(
+            roi=request.roi,
+            start_year=request.start_year,
+            end_year=request.end_year,
+            threshold=request.threshold
+        )
+        
+        if "error" in result:
+            raise HTTPException(
+                status_code=500,
+                detail=result["error"]
+            )
+        
+        logger.info(f"✅ Water change analysis completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in water change endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.get("/water/quality")
+async def get_water_quality_info():
+    """
+    Get information about water analysis quality and methodology
+    
+    Returns:
+    - Dataset information
+    - Methodology details
+    - Quality thresholds
+    - Limitations and recommendations
+    """
+    try:
+        # Create water service instance and call the method
+        water_service = WaterService()
+        result = water_service.get_water_quality_info()
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in water quality info endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
         )
