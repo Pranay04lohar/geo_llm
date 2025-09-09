@@ -16,7 +16,9 @@ export default function Home() {
   const [result, setResult] = useState('')
   const [earthSpeed, setEarthSpeed] = useState(0.002)
   const [cotLines, setCotLines] = useState([])
+  const [messages, setMessages] = useState([])
   const cotTimersRef = useRef([])
+  const messagesEndRef = useRef(null)
   const [showFullScreen, setShowFullScreen] = useState(false)
   const [roiData, setRoiData] = useState([])
 
@@ -24,12 +26,16 @@ export default function Home() {
   useEffect(() => {
     const savedLeft = localStorage.getItem('geollm-left-sidebar-collapsed')
     const savedRight = localStorage.getItem('geollm-right-sidebar-collapsed')
+    const savedMessages = localStorage.getItem('geollm-chat-messages')
     
     if (savedLeft !== null) {
       setLeftCollapsed(JSON.parse(savedLeft))
     }
     if (savedRight !== null) {
       setRightCollapsed(JSON.parse(savedRight))
+    }
+    if (savedMessages !== null) {
+      setMessages(JSON.parse(savedMessages))
     }
     
     setIsHydrated(true)
@@ -84,6 +90,29 @@ export default function Home() {
       cotTimersRef.current = []
     }
   }, [])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messages.length > 0) {
+      localStorage.setItem('geollm-chat-messages', JSON.stringify(messages))
+    }
+  }, [messages])
+
+  // Clear chat messages
+  const clearChat = () => {
+    setMessages([])
+    setPrompt('')
+    setResult('')
+    setCotLines([])
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('geollm-chat-messages')
+    }
+  }
 
   // Don't render until hydrated to prevent hydration mismatch
   if (!isHydrated) {
@@ -231,8 +260,19 @@ export default function Home() {
                   <h1 className="text-white font-bold text-3xl md:text-4xl">GeoLLM</h1>
                 </div>
                 
-                {/* Right: Settings Button */}
+                {/* Right: Settings and Clear Chat Buttons */}
                 <div className="flex items-center gap-3 flex-shrink-0">
+                  {messages.length > 0 && (
+                    <button 
+                      onClick={clearChat}
+                      className="text-white/70 hover:text-white transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10"
+                      title="Clear chat history"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
                   <button className="text-white/70 hover:text-white transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -243,51 +283,58 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Chat Messages - Centered Welcome */}
-            <div className="flex-1 overflow-y-auto flex items-center justify-center p-8">
-              <div className="text-center max-w-2xl relative z-20 ml-16 w-full">
-                {!isProcessing && !result && (
-                  <>
+            {/* Chat Messages - Welcome or Message History */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {messages.length === 0 && !isProcessing ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center max-w-2xl relative z-20 ml-16 w-full">
                     <div className="text-white font-medium text-5xl mb-6 leading-tight">
                       What&apos;s on your mind today?
                     </div>
                     <div className="text-white/70 text-lg font-bold max-w-lg mx-auto leading-relaxed">
                       Ask me anything about geography, boundaries, or spatial data analysis
                     </div>
-                  </>
-                )}
-              </div>
-            </div>
-            
-            {/* Chat Input and CoT Container */}
-            <div className="flex flex-col p-8">
-              {/* Chain-of-Thought Animation Container */}
-              <div className={`transition-all duration-500 overflow-hidden ${isProcessing ? 'max-h-screen opacity-100 mb-5' : 'max-h-0 opacity-0 mb-0'}`}>
-                <div className="flex flex-col items-center gap-4 w-full" role="status" aria-live="polite">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
-                  <div className="text-white/80 text-base font-medium tracking-wide">
-                    Thinking<span className="inline-block animate-pulse">...</span>
-                  </div>
-                  <div className="w-full max-w-4xl text-left bg-black/40 border border-white/10 rounded-xl p-4">
-                    {cotLines.map((line, i) => (
-                      <div key={i} className="text-white/80 text-sm mb-1 whitespace-pre-wrap">
-                        {line}
-                      </div>
-                    ))}
                   </div>
                 </div>
-              </div>
-
-              {/* Result Display */}
-              {!isProcessing && result && (
-                <div className="mb-5 bg-white/10 border border-white/15 rounded-2xl p-5 text-left text-white/90 shadow-xl transition-all whitespace-pre-wrap">
-                  {result}
+              ) : (
+                <div className="max-w-6xl mx-auto space-y-4">
+                  {messages.map((message, index) => (
+                    <div
+                      key={index}
+                      className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-5 py-4 ${
+                          message.type === 'user'
+                            ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white'
+                            : 'bg-white/10 text-white/90 border border-white/20'
+                        }`}
+                      >
+                        {message.type === 'cot' ? (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+                              <span className="text-sm font-medium">Thinking...</span>
+                            </div>
+                            <div className="text-sm whitespace-pre-wrap">
+                              {message.content}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-wrap">{message.content}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
                 </div>
               )}
-
-              {/* Chat Input Area */}
+            </div>
+            
+            {/* Chat Input Area */}
+            <div className="p-8">
               <div className="flex justify-center">
-                <div className="w-full max-w-4xl">
+                <div className="w-full max-w-6xl">
                   <div className="relative">
                     <textarea 
                       placeholder="Ask anything about geography, boundaries, or spatial data..."
@@ -354,21 +401,44 @@ export default function Home() {
                       disabled={isProcessing || !prompt.trim()}
                       onClick={async () => {
                         if (!prompt.trim()) return
+                        
+                        const userPrompt = prompt.trim()
+                        setPrompt('')
+                        
+                        // Add user message immediately
+                        setMessages(prev => [...prev, { type: 'user', content: userPrompt }])
+                        
                         setIsProcessing(true)
                         setEarthSpeed(0.0005)
-                        setResult('')
-                        setCotLines([])
+                        
+                        // Add CoT message placeholder
+                        const cotMessageId = Date.now()
+                        setMessages(prev => [...prev, { type: 'cot', content: '', id: cotMessageId }])
+                        
                         // progressively reveal CoT lines
+                        let cotContent = ''
                         COT_SCRIPT.forEach((line, idx) => {
                           const id = setTimeout(() => {
-                            setCotLines((prev) => [...prev, line])
+                            cotContent += line + '\n'
+                            setMessages(prev => prev.map(msg => 
+                              msg.id === cotMessageId 
+                                ? { ...msg, content: cotContent }
+                                : msg
+                            ))
                           }, 300 * idx)
                           cotTimersRef.current.push(id)
                         })
+                        
                         // simulate backend delay ~5s
                         await new Promise((res) => setTimeout(res, 5000))
-                        setResult(FINAL_TEXT)
-                        setPrompt('')
+                        
+                        // Replace CoT message with final response
+                        setMessages(prev => prev.map(msg => 
+                          msg.id === cotMessageId 
+                            ? { type: 'assistant', content: FINAL_TEXT }
+                            : msg
+                        ))
+                        
                         setIsProcessing(false)
                         setEarthSpeed(0.002)
                       }}
