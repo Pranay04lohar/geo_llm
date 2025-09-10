@@ -194,36 +194,72 @@ textarea:focus-visible {
   animation: fadeInUp 0.5s ease-out;
 }
 
-/* Tour spotlight effect */
-.tour-spotlight {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: radial-gradient(
-    circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
-    transparent 0px,
-    transparent 200px,
-    rgba(0, 0, 0, 0.8) 300px
-  );
-  pointer-events: none;
+
+/* Pointer Arrow Styles */
+.pointer-bottom {
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 12px solid #3b82f6;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
-/* Tour target highlighting */
-#prompt-input.tour-highlight,
-#file-upload.tour-highlight,
-#mini-map.tour-highlight {
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5);
-  border-radius: 8px;
-  animation: tour-pulse 2s infinite;
+.pointer-top {
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 12px solid #3b82f6;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
-@keyframes tour-pulse {
+.pointer-left {
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-right: 12px solid #3b82f6;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pointer-right {
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-left: 12px solid #3b82f6;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Pointer Animation */
+@keyframes pointer-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.5);
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0.3);
+    transform: translateX(-50%) scale(1.1);
+    opacity: 0.8;
   }
+}
+
+@keyframes pointer-pulse-vertical {
+  0%, 100% {
+    transform: translateY(-50%) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-50%) scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+.animate-pointer-pulse {
+  animation: pointer-pulse 2s infinite;
+}
+
+.pointer-left.animate-pointer-pulse,
+.pointer-right.animate-pointer-pulse {
+  animation: pointer-pulse-vertical 2s infinite;
 }
