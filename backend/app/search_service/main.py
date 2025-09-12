@@ -1,53 +1,54 @@
-# """
-# Search API Service - FastAPI application for web search and location intelligence.
+"""
+Search API Service - FastAPI application for web search and location intelligence.
 
-# This service provides:
-# 1. Location resolution (coordinates, boundaries, area)
-# 2. Environmental context (reports, studies, news)
-# 3. Complete analysis fallback when GEE/RAG services fail
+This service provides:
+1. Location resolution (coordinates, boundaries, area)
+2. Environmental context (reports, studies, news)
+3. Complete analysis fallback when GEE/RAG services fail
 
-# Uses Tavily API for LLM-optimized web search.
-# """
+Uses Tavily API for LLM-optimized web search.
+"""
 
-# from fastapi import FastAPI, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
-# from pydantic import BaseModel
-# from typing import Dict, List, Optional, Any
-# import os
-# import logging
-# from pathlib import Path
-# from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Dict, List, Optional, Any
+import os
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
 
-# # Load environment variables from .env file
-# # Look for .env in the backend directory (parent of search_service)
-# backend_dir = Path(__file__).parent.parent.parent
-# env_path = backend_dir / ".env"
-# load_dotenv(env_path)
+# Load environment variables from .env file
+# Look for .env in the backend directory (parent of search_service)
+backend_dir = Path(__file__).parent.parent.parent
+env_path = backend_dir / ".env"
+load_dotenv(env_path)
 
-# # Import our services
-# from services.tavily_client import TavilyClient
-# from services.location_resolver import LocationResolver
-# from services.result_processor import ResultProcessor
+# Import our services
+from services.nominatim_client import NominatimClient
+from services.tavily_client import TavilyClient
+from services.location_resolver import LocationResolver
+from services.result_processor import ResultProcessor
 
-# # Setup logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# # Initialize FastAPI app
-# app = FastAPI(
-#     title="Search API Service",
-#     description="Web search and location intelligence service for GeoLLM",
-#     version="1.0.0"
-# )
+# Initialize FastAPI app
+app = FastAPI(
+    title="Search API Service",
+    description="Web search and location intelligence service for GeoLLM",
+    version="1.0.0"
+)
 
-# # Add CORS middleware
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # Configure appropriately for production
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # # Initialize services
 # tavily_client = TavilyClient()
@@ -503,14 +504,15 @@ async def get_location_data(request: LocationRequest):
         logger.info(f"Resolving location: {request.location_name} ({request.location_type})")
         
         # Use Nominatim client directly to get polygon geometry
-        from app.search_service.services.nominatim_client import NominatimClient
         nominatim_client = NominatimClient()
         
-        logger.info(f"🔍 Calling Nominatim client for: {request.location_name}")
+        logger.info(f"🔍 SEARCH SERVICE: Calling Nominatim client for: {request.location_name} ({request.location_type})")
+        logger.info(f"🔍 SEARCH SERVICE: Request details - name: {request.location_name}, type: {request.location_type}")
         location_data = nominatim_client.search_location(
-            request.location_name, 
+            request.location_name,
             request.location_type
         )
+        logger.info(f"🔍 SEARCH SERVICE: Nominatim client returned location data: {bool(location_data)}")
         
         logger.info(f"📊 Nominatim client returned: {type(location_data)}")
         if location_data:

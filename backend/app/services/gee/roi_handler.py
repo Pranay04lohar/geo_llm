@@ -68,8 +68,21 @@ class ROIHandler:
         
         # Prefer in-process Nominatim client from search_service to avoid HTTP and import issues
         try:
-            from app.search_service.services.nominatim_client import NominatimClient  # type: ignore
+            # Try multiple import paths for robustness
+            try:
+                from app.search_service.services.nominatim_client import NominatimClient  # type: ignore
+            except ImportError:
+                # Try relative import from backend directory
+                import sys
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                backend_dir = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
+                if backend_dir not in sys.path:
+                    sys.path.insert(0, backend_dir)
+                from app.search_service.services.nominatim_client import NominatimClient  # type: ignore
+
             self.nominatim_client = NominatimClient()
+            print("✅ NominatimClient successfully initialized")
         except Exception as e:
             self.nominatim_client = None
             print(f"⚠️ NominatimClient unavailable, will fallback to HTTP search or geocoder: {e}")
@@ -128,9 +141,13 @@ class ROIHandler:
         location_type = primary_location.get("type", "city").lower()
         
         # Try to get location data via in-process Nominatim first
+        print(f"🔍 ROI Handler: Trying Nominatim client for {location_name}")
         search_data = self._get_location_via_nominatim(location_name, location_type)
         
-        if not search_data:
+        if search_data:
+            print(f"🔍 ROI Handler: ✅ Nominatim client succeeded for {location_name}")
+        else:
+            print(f"🔍 ROI Handler: ❌ Nominatim client failed, trying HTTP Search API for {location_name}")
             # Fallback to Search API HTTP service
             search_data = self._get_location_from_search_api(location_name, location_type)
         
@@ -342,7 +359,8 @@ class ROIHandler:
             Dict with coordinates, area, polygon geometry, and other location data, or None if failed
         """
         try:
-            print(f"🔍 ROI Handler: Calling Search API for {location_name}")
+            print(f"🔍 ROI Handler: Calling Search API for {location_name} (type: {location_type})")
+            print(f"🔍 ROI Handler: Using URL: {self.search_api_url}/search/location-data")
             response = requests.post(
                 f"{self.search_api_url}/search/location-data",
                 json={
@@ -353,6 +371,11 @@ class ROIHandler:
             )
             
             print(f"🔍 ROI Handler: Search API response status: {response.status_code}")
+            print(f"🔍 ROI Handler: Response headers: {dict(response.headers)}")
+            if response.status_code != 200:
+                print(f"🔍 ROI Handler: Response text: {response.text}")
+            else:
+                print(f"🔍 ROI Handler: Response preview: {response.text[:200]}...")
             if response.status_code == 200:
                 data = response.json()
                 print(f"🔍 ROI Handler: Search API success: {data.get('success', False)}")

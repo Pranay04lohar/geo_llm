@@ -45,10 +45,39 @@ def test_core_llm_agent():
             analysis_data = result.get("analysis_data", {})
             if analysis_data:
                 print(f"📊 Analysis type: {analysis_data.get('analysis_type', 'Unknown')}")
-                print(f"📈 Water percentage: {analysis_data.get('water_percentage', 'N/A')}")
+                
+                # Show detailed analysis based on type
+                analysis_type = analysis_data.get('analysis_type', '').lower()
+                if analysis_type == 'water':
+                    print(f"   💧 Water percentage: {analysis_data.get('water_percentage', 'N/A')}%")
+                    print(f"   🏜️ Non-water percentage: {analysis_data.get('non_water_percentage', 'N/A')}%")
+                elif analysis_type == 'ndvi':
+                    print(f"   🌱 Mean NDVI: {analysis_data.get('mean_ndvi', 'N/A')}")
+                    print(f"   📊 Min NDVI: {analysis_data.get('min_ndvi', 'N/A')}")
+                    print(f"   📈 Max NDVI: {analysis_data.get('max_ndvi', 'N/A')}")
+                elif analysis_type == 'lulc':
+                    print(f"   🏘️ Dominant class: {analysis_data.get('dominant_class', 'N/A')}")
+                    class_pct = analysis_data.get('class_percentages', {})
+                    if class_pct:
+                        print(f"   📊 Class distribution: {class_pct}")
+                elif analysis_type == 'lst':
+                    print(f"   🌡️ Mean LST: {analysis_data.get('mean_lst', 'N/A')}°C")
+                    print(f"   🏙️ UHI intensity: {analysis_data.get('uhi_intensity', 'N/A')}°C")
+                
                 print(f"🗺️ Tile URL: {'✅' if analysis_data.get('tile_url') else '❌'}")
             else:
                 print("⚠️ No analysis data found")
+
+            # Check natural language summary
+            summary = result.get("summary", "")
+            if summary and summary != "Analysis completed. See details for metrics and map visualization.":
+                print(f"🗣️ Natural Language Summary: {summary}")
+            else:
+                print("⚠️ Natural language summary not generated properly")
+                print(f"🔍 Summary field: {summary}")
+
+            # Debug: Show full result if there are issues
+            if not analysis_data or not summary:
                 print(f"🔍 Full result: {result}")
         else:
             print(f"❌ Query processing failed: {result.get('error', 'Unknown error')}")

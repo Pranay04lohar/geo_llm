@@ -127,6 +127,17 @@ class WaterService:
             if roi.get('type') == 'Polygon':
                 coords = roi['coordinates']
                 return ee.Geometry.Polygon(coords)
+            elif roi.get('type') == 'MultiPolygon':
+                coords = roi['coordinates']
+                # Convert MultiPolygon to a single polygon by taking the first polygon
+                # or create a union of all polygons
+                if len(coords) == 1:
+                    # Single polygon in MultiPolygon
+                    return ee.Geometry.Polygon(coords[0])
+                else:
+                    # Multiple polygons - create union
+                    polygons = [ee.Geometry.Polygon(polygon_coords) for polygon_coords in coords]
+                    return ee.Geometry.MultiPolygon(polygons).dissolve()
             elif roi.get('type') == 'Point':
                 coords = roi['coordinates']
                 return ee.Geometry.Point(coords[0], coords[1]).buffer(1000)  # 1km buffer for points

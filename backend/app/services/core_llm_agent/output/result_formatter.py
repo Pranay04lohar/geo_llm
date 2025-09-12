@@ -70,12 +70,13 @@ class ResultFormatter:
             
             # Create final result
             # Build natural-language summary from normalized analysis_data if present
-            summary = self._build_natural_language_summary(intent_result, service_response)
+            nl_summary = self._build_natural_language_summary(intent_result, service_response)
+            logger.info(f"Generated natural language summary: {nl_summary[:100]}...")  # Log first 100 chars
 
             result = {
                 "analysis": enhanced_analysis,
                 "roi": formatted_roi,
-                "summary": summary,
+                "summary": nl_summary,
                 "metadata": {
                     "query": query,
                     "service_type": intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type),
@@ -91,9 +92,16 @@ class ResultFormatter:
             # Add optional fields if available
             if "sources" in service_response:
                 result["sources"] = service_response["sources"]
-            
+
             if "confidence" in service_response:
                 result["confidence"] = service_response["confidence"]
+
+            # Surface analysis_data for consumers/tests
+            if "analysis_data" in service_response:
+                result["analysis_data"] = service_response["analysis_data"]
+
+            if "service_result" in service_response:
+                result["service_result"] = service_response["service_result"]
             
             service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
             logger.info(f"Formatted final result for {service_type_str} service")
@@ -104,39 +112,94 @@ class ResultFormatter:
             return self._error_result(query, str(e), total_processing_time)
 
     def _build_natural_language_summary(self, intent_result: IntentResult, service_response: Dict[str, Any]) -> str:
-        """Create a concise natural language summary based on analysis_data."""
+        """Create a concise natural language summary based on analysis_data, handling errors gracefully."""
         try:
             analysis_type = getattr(intent_result, 'analysis_type', None)
             if hasattr(analysis_type, 'value'):
                 analysis_type = analysis_type.value
             analysis_type = (analysis_type or '').lower()
+
             data = service_response.get("analysis_data", {})
 
+            # Check if there's an error in the data
+            if data.get("error"):
+                error_msg = data.get("error", "Unknown error")
+                return f"Sorry, I encountered an issue while processing your request: {error_msg}. Please try again later."
+
+            # Generate meaningful summaries based on analysis type
             if analysis_type == "water":
                 wp = data.get("water_percentage")
                 if wp is not None:
-                    return f"Estimated surface water coverage is {wp}% over the selected area."
+                    try:
+                        wp_float = float(wp)
+                        if wp_float > 50:
+                            return f"The area shows extensive water coverage at {wp_float:.1f}%, indicating significant water bodies, lakes, or coastal regions."
+                        elif wp_float > 20:
+                            return f"Moderate water coverage of {wp_float:.1f}% was found, suggesting mixed land-water usage."
+                        else:
+                            return f"Low water coverage at {wp_float:.1f}% indicates mostly dry land with limited water features."
+                    except (ValueError, TypeError):
+                        return f"Water coverage analysis shows {wp}% in the selected area."
+                else:
+                    return "Water coverage analysis was performed. Check the detailed results for specific percentages."
+
             elif analysis_type == "ndvi":
                 mean_ndvi = data.get("mean_ndvi")
                 if mean_ndvi is not None:
-                    return f"Average NDVI is {float(mean_ndvi):.3f}, indicating overall vegetation condition."
+                    try:
+                        ndvi_float = float(mean_ndvi)
+                        if ndvi_float > 0.6:
+                            health = "excellent vegetation health"
+                        elif ndvi_float > 0.4:
+                            health = "good vegetation health"
+                        elif ndvi_float > 0.2:
+                            health = "moderate vegetation health"
+                        else:
+                            health = "sparse or stressed vegetation"
+                        return f"Vegetation analysis shows {health} with an average NDVI of {ndvi_float:.3f}."
+                    except (ValueError, TypeError):
+                        return f"Vegetation health analysis completed with average NDVI of {mean_ndvi}."
+                else:
+                    return "Vegetation health analysis was completed. Review the detailed results for NDVI values."
+
             elif analysis_type == "lulc":
                 dom = data.get("dominant_class")
                 if dom:
-                    return f"Dominant land cover is {dom}. View map for distribution details."
+                    return f"Land cover analysis reveals {dom} as the dominant land use type in the selected area."
+                else:
+                    return "Land cover classification analysis was completed. Check the detailed results for land use distribution."
+
             elif analysis_type == "lst":
                 mean_lst = data.get("mean_lst")
                 uhi = data.get("uhi_intensity")
-                parts = []
                 if mean_lst is not None:
-                    parts.append(f"Mean LST {mean_lst}°C")
-                if uhi is not None:
-                    parts.append(f"UHI {uhi}°C")
-                if parts:
-                    return ", ".join(parts) + "."
-        except Exception:
-            pass
-        return "Analysis completed. See details for metrics and map visualization."
+                    try:
+                        lst_float = float(mean_lst)
+                        temp_desc = f"hot" if lst_float > 40 else f"warm" if lst_float > 30 else f"moderate" if lst_float > 20 else "cool"
+                        summary = f"The area has a {temp_desc} surface temperature averaging {lst_float:.1f}°C."
+                        if uhi is not None:
+                            try:
+                                uhi_float = float(uhi)
+                                if uhi_float > 5:
+                                    summary += f" A significant urban heat island effect of {uhi_float:.1f}°C was detected."
+                                elif uhi_float > 2:
+                                    summary += f" Moderate urban heat island effect of {uhi_float:.1f}°C observed."
+                                else:
+                                    summary += " Minimal urban heat island effect detected."
+                            except (ValueError, TypeError):
+                                summary += f" Urban heat island intensity measured at {uhi}°C."
+                        return summary
+                    except (ValueError, TypeError):
+                        return f"Surface temperature analysis shows average LST of {mean_lst}°C."
+                else:
+                    return "Surface temperature analysis was completed. Check detailed results for temperature metrics."
+
+            # Default summary for unknown analysis types
+            return f"{analysis_type.title() if analysis_type else 'Geospatial'} analysis was completed successfully."
+
+        except Exception as e:
+            logger.warning(f"Error building natural language summary: {e}")
+            return "Analysis completed. See details for metrics and map visualization."
     
     def _enhance_analysis(
         self,

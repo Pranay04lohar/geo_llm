@@ -335,10 +335,24 @@ class ServiceDispatcher:
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP error calling GEE service: {e}")
-            return self._error_response(f"GEE service connection failed: {str(e)}")
+            # Create a basic error response with analysis_data for consistency
+            error_response = self._error_response(f"GEE service connection failed: {str(e)}")
+            error_response["analysis_data"] = {
+                "analysis_type": analysis_type,
+                "error": str(e),
+                "tile_url": None
+            }
+            return error_response
         except Exception as e:
             logger.error(f"Error calling GEE HTTP service: {e}")
-            return self._error_response(f"GEE service error: {str(e)}")
+            # Create a basic error response with analysis_data for consistency
+            error_response = self._error_response(f"GEE service error: {str(e)}")
+            error_response["analysis_data"] = {
+                "analysis_type": analysis_type,
+                "error": str(e),
+                "tile_url": None
+            }
+            return error_response
     
     def _dispatch_rag(
         self, 
