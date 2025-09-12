@@ -158,13 +158,8 @@ class ServiceDispatcher:
             # Route to specific GEE service based on sub-intent
             analysis_type = intent_result.analysis_type
             
-            if analysis_type == "ndvi" and self.gee_services_available:
-                return self._call_ndvi_service(roi_info, query)
-            elif analysis_type == "lst" and self.gee_services_available:
-                return self._call_lst_service(roi_info, query)
-            else:
-                # Fallback to HTTP service
-                return self._call_gee_http_service(analysis_type, roi_info, query)
+            # Always use HTTP service calls for reliability
+            return self._call_gee_http_service(analysis_type, roi_info, query)
                 
         except Exception as e:
             logger.error(f"Error in GEE service dispatch: {e}")
@@ -282,21 +277,41 @@ class ServiceDispatcher:
                     "endDate": "2023-08-31",
                     "cloudThreshold": 30,
                     "scale": 30,
-                    "maxPixels": 5e8,
+                    "maxPixels": 2e8,
                     "includeTimeSeries": False,
                     "exactComputation": False
                 }
             elif analysis_type == "lst":
-                url = "http://localhost:8000/lst/temperature-analysis"
+                url = "http://localhost:8000/lst/land-surface-temperature"
                 payload = {
                     "geometry": roi_info["geometry"],
-                    "startDate": "2023-06-01",
-                    "endDate": "2023-08-31",
+                    "startDate": "2024-01-01",
+                    "endDate": "2024-08-31",
                     "includeUHI": True,
                     "includeTimeSeries": False,
                     "scale": 1000,
-                    "maxPixels": 1e8,
+                    "maxPixels": 5e7,
                     "exactComputation": False
+                }
+            elif analysis_type == "water":
+                url = "http://localhost:8000/water/analyze"
+                payload = {
+                    "roi": roi_info["geometry"],
+                    "year": 2023,
+                    "threshold": 20,
+                    "include_seasonal": True
+                }
+            elif analysis_type == "lulc":
+                url = "http://localhost:8000/lulc/dynamic-world"
+                payload = {
+                    "geometry": roi_info["geometry"],
+                    "startDate": "2023-01-01",
+                    "endDate": "2023-12-31",
+                    "confidenceThreshold": 0.3,
+                    "scale": 20,
+                    "maxPixels": 5e8,
+                    "exactComputation": False,
+                    "includeMedianVis": False
                 }
             else:  # Default to LULC
                 url = "http://localhost:8000/lulc/dynamic-world"
@@ -315,11 +330,8 @@ class ServiceDispatcher:
             response.raise_for_status()
             result = response.json()
             
-            if result.get("success"):
-                return self._format_gee_response(result, analysis_type, roi_info)
-            else:
-                logger.error(f"GEE HTTP service failed: {result.get('error')}")
-                return self._error_response(f"GEE {analysis_type} analysis failed: {result.get('error')}")
+            # GEE services return data directly, not wrapped in success/error
+            return self._format_gee_response(result, analysis_type, roi_info)
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP error calling GEE service: {e}")
@@ -432,9 +444,40 @@ class ServiceDispatcher:
         Returns:
             Formatted response dictionary
         """
-        # This would contain the formatting logic from the original gee_tool_node
-        # For now, return the service result with minimal formatting
-        
+        # Normalize analysis_data across services for downstream consumers/tests
+        analysis_data: Dict[str, Any] = {"analysis_type": analysis_type}
+        if analysis_type == "water":
+            stats = service_result.get("mapStats", {})
+            analysis_data.update({
+                "water_percentage": stats.get("water_percentage"),
+                "non_water_percentage": stats.get("non_water_percentage"),
+                "tile_url": service_result.get("urlFormat")
+            })
+        elif analysis_type == "ndvi":
+            stats = service_result.get("mapStats", {}).get("ndvi_statistics", {})
+            analysis_data.update({
+                "mean_ndvi": stats.get("mean"),
+                "min_ndvi": stats.get("min"),
+                "max_ndvi": stats.get("max"),
+                "tile_url": service_result.get("urlFormat")
+            })
+        elif analysis_type == "lulc":
+            stats = service_result.get("mapStats", {})
+            analysis_data.update({
+                "dominant_class": stats.get("dominant_class"),
+                "class_percentages": stats.get("class_percentages"),
+                "tile_url": service_result.get("urlFormat")
+            })
+        elif analysis_type == "lst":
+            lst_stats = service_result.get("lst_stats", {})
+            analysis_data.update({
+                "mean_lst": lst_stats.get("LST_mean"),
+                "uhi_intensity": service_result.get("uhi_intensity"),
+                "tile_url": service_result.get("urlFormat")
+            })
+        else:
+            analysis_data["tile_url"] = service_result.get("urlFormat")
+
         analysis_text = service_result.get("extraDescription", f"{analysis_type.upper()} analysis completed")
         
         # Create ROI feature
@@ -456,6 +499,7 @@ class ServiceDispatcher:
             "roi": roi_feature,
             "evidence": [f"{analysis_type}_service:success"],
             "service_result": service_result,
+            "analysis_data": analysis_data,
             "processing_time": service_result.get("processing_time_seconds", 0)
         }
     

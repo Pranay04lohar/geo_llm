@@ -69,9 +69,13 @@ class ResultFormatter:
             )
             
             # Create final result
+            # Build natural-language summary from normalized analysis_data if present
+            summary = self._build_natural_language_summary(intent_result, service_response)
+
             result = {
                 "analysis": enhanced_analysis,
                 "roi": formatted_roi,
+                "summary": summary,
                 "metadata": {
                     "query": query,
                     "service_type": intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type),
@@ -98,6 +102,41 @@ class ResultFormatter:
         except Exception as e:
             logger.error(f"Error formatting final result: {e}")
             return self._error_result(query, str(e), total_processing_time)
+
+    def _build_natural_language_summary(self, intent_result: IntentResult, service_response: Dict[str, Any]) -> str:
+        """Create a concise natural language summary based on analysis_data."""
+        try:
+            analysis_type = getattr(intent_result, 'analysis_type', None)
+            if hasattr(analysis_type, 'value'):
+                analysis_type = analysis_type.value
+            analysis_type = (analysis_type or '').lower()
+            data = service_response.get("analysis_data", {})
+
+            if analysis_type == "water":
+                wp = data.get("water_percentage")
+                if wp is not None:
+                    return f"Estimated surface water coverage is {wp}% over the selected area."
+            elif analysis_type == "ndvi":
+                mean_ndvi = data.get("mean_ndvi")
+                if mean_ndvi is not None:
+                    return f"Average NDVI is {float(mean_ndvi):.3f}, indicating overall vegetation condition."
+            elif analysis_type == "lulc":
+                dom = data.get("dominant_class")
+                if dom:
+                    return f"Dominant land cover is {dom}. View map for distribution details."
+            elif analysis_type == "lst":
+                mean_lst = data.get("mean_lst")
+                uhi = data.get("uhi_intensity")
+                parts = []
+                if mean_lst is not None:
+                    parts.append(f"Mean LST {mean_lst}°C")
+                if uhi is not None:
+                    parts.append(f"UHI {uhi}°C")
+                if parts:
+                    return ", ".join(parts) + "."
+        except Exception:
+            pass
+        return "Analysis completed. See details for metrics and map visualization."
     
     def _enhance_analysis(
         self,

@@ -64,7 +64,15 @@ class ROIHandler:
     def __init__(self):
         """Initialize ROI handler with geocoding setup."""
         self.geocoder = None
-        self.search_api_url = "http://localhost:8001"  # Search API Service URL
+        self.search_api_url = "http://localhost:8001"  # Search API Service URL (legacy)
+        
+        # Prefer in-process Nominatim client from search_service to avoid HTTP and import issues
+        try:
+            from app.search_service.services.nominatim_client import NominatimClient  # type: ignore
+            self.nominatim_client = NominatimClient()
+        except Exception as e:
+            self.nominatim_client = None
+            print(f"⚠️ NominatimClient unavailable, will fallback to HTTP search or geocoder: {e}")
         self._setup_geocoder()
         
         # Default location (Mumbai) as fallback
@@ -119,8 +127,12 @@ class ROIHandler:
         # Get location type first
         location_type = primary_location.get("type", "city").lower()
         
-        # Try to get location data from Search API Service first
-        search_data = self._get_location_from_search_api(location_name, location_type)
+        # Try to get location data via in-process Nominatim first
+        search_data = self._get_location_via_nominatim(location_name, location_type)
+        
+        if not search_data:
+            # Fallback to Search API HTTP service
+            search_data = self._get_location_from_search_api(location_name, location_type)
         
         if search_data:
             # Use Search API Service data with polygon geometry
@@ -140,7 +152,7 @@ class ROIHandler:
             else:
                 print(f"⚠️ No polygon geometry available, using fallback approach")
         else:
-            # Fallback to geocoding
+            # Fallback to simple geocoding
             coords = self._geocode_location(location_name)
             if not coords:
                 return None
@@ -196,6 +208,32 @@ class ROIHandler:
             "search_api_data": search_data,  # Include Search API data for reference
             "area_km2": area_km2  # Include area data
         }
+
+    def _get_location_via_nominatim(self, location_name: str, location_type: str = "city") -> Optional[Dict[str, Any]]:
+        """Use in-process Nominatim client from search_service for robust geocoding with polygons."""
+        if not getattr(self, "nominatim_client", None):
+            return None
+        try:
+            result = self.nominatim_client.search_location(location_name, location_type)
+            if not result:
+                return None
+            coords = result.get("coordinates", {})
+            if not coords or coords.get("lat") is None or coords.get("lng") is None:
+                return None
+            return {
+                "lat": coords["lat"],
+                "lng": coords["lng"],
+                "area_km2": result.get("area_km2"),
+                "polygon_geometry": result.get("polygon_geometry"),
+                "geometry_tiles": result.get("geometry_tiles", []),
+                "bounding_box": result.get("bounding_box"),
+                "is_tiled": result.get("is_tiled", False),
+                "is_fallback": result.get("is_fallback", False),
+                "source": "nominatim_client"
+            }
+        except Exception as e:
+            print(f"⚠️ Nominatim client failed for {location_name}: {e}")
+            return None
         
     def extract_roi_from_query(self, query: str) -> Optional[Dict[str, Any]]:
         """

@@ -266,8 +266,8 @@ def test_water_service(base_url: str = "http://localhost:8000"):
             print(f"📏 Resolution: {result['resolution']}")
             print(f"📅 Temporal Coverage: {result['temporal_coverage']}")
             print(f"🔬 Methodology: {result['methodology']}")
-            print("\n📋 Thresholds:")
-            for key, value in result['thresholds'].items():
+            print("\n📋 Custom Thresholds:")
+            for key, value in result['custom_thresholds'].items():
                 print(f"  {key}: {value}%")
             
         else:
