@@ -428,7 +428,12 @@ class ServiceDispatcher:
                 ]
             
             # Call search service
+            logger.info(f"DEBUG - Calling search service with analysis_type: '{intent_result.analysis_type}'")
             result = self.search_service(query, locations_legacy, intent_result.analysis_type)
+            
+            # Debug: Log what search service returns
+            logger.info(f"DEBUG - Search service result keys: {list(result.keys()) if result else 'None'}")
+            logger.info(f"DEBUG - Search service evidence: {result.get('evidence', 'NOT_FOUND') if result else 'None'}")
             
             return {
                 "analysis": result.get("analysis", "Search analysis completed"),

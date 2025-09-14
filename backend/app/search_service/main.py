@@ -448,6 +448,7 @@ load_dotenv(env_path)
 from services.tavily_client import TavilyClient
 from services.location_resolver import LocationResolver
 from services.result_processor import ResultProcessor
+from services.enhanced_result_processor import EnhancedResultProcessor
 
 # Import the models
 from models import (
@@ -480,6 +481,7 @@ app.add_middleware(
 tavily_client = TavilyClient()
 location_resolver = LocationResolver()
 result_processor = ResultProcessor()
+enhanced_result_processor = EnhancedResultProcessor()
 
 # Health check endpoint
 @app.get("/health")
@@ -740,6 +742,54 @@ async def get_complete_analysis(request: CompleteAnalysisRequest):
             error=str(e),
             analysis="Analysis generation failed"
         )
+
+# Enhanced analysis endpoint with data extraction and validation
+@app.post("/search/enhanced-analysis")
+async def get_enhanced_analysis(request: CompleteAnalysisRequest):
+    """
+    Generate enhanced analysis with data extraction and validation.
+    
+    This endpoint provides:
+    - Multiple search strategies for comprehensive data collection
+    - Structured data extraction and validation
+    - Quality assessment and confidence scoring
+    - Data-rich analysis with specific metrics
+    """
+    try:
+        logger.info(f"Generating enhanced analysis for: {request.query}")
+        
+        # Get location data first
+        location_data = None
+        if request.locations:
+            primary_location = request.locations[0]
+            location_data = await location_resolver.resolve_location(
+                primary_location.get("matched_name", ""),
+                primary_location.get("type", "city")
+            )
+        
+        # Use enhanced result processor
+        enhanced_analysis = await enhanced_result_processor.generate_enhanced_analysis(
+            analysis_type=request.analysis_type,
+            location=request.locations[0].get("matched_name", "Unknown") if request.locations else "Unknown",
+            location_data=location_data
+        )
+        
+        return enhanced_analysis
+        
+    except Exception as e:
+        logger.error(f"Error generating enhanced analysis: {e}")
+        return {
+            "analysis": f"Enhanced analysis generation failed: {str(e)}",
+            "roi": None,
+            "sources": [],
+            "confidence": 0.0,
+            "structured_data": {},
+            "data_quality": {"overall": 0.0},
+            "search_metadata": {},
+            "extracted_metrics_count": 0,
+            "success": False,
+            "error": str(e)
+        }
 
 # Helper functions
 def _generate_search_queries(location: str, analysis_type: str, base_query: str) -> List[str]:

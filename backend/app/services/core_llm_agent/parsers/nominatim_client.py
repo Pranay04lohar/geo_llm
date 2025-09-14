@@ -59,22 +59,24 @@ class NominatimClient:
         """
         self._rate_limit()
         
-        # Build search query
+        # Build search query - prioritize city-level results
         query = entity.matched_name
         if entity.type == "city":
-            query += f", {entity.type}"
+            query += f", {entity.type}, {country_code.upper()}"
         
         params = {
             'q': query,
             'format': 'json',
             'polygon_geojson': '1',
             'addressdetails': '1',
-            'limit': '1',
-            'countrycodes': country_code
+            'limit': '5',  # Get more results to find city-level
+            'countrycodes': country_code,
+            'featuretype': 'city'  # Prioritize city-level results
         }
         
         try:
             url = f"{self.base_url}/search"
+            logger.info(f"DEBUG - Geocoding query: '{query}' with params: {params}")
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             
@@ -83,7 +85,12 @@ class NominatimClient:
                 logger.warning(f"No geocoding results for: {entity.matched_name}")
                 return None
             
-            result = results[0]
+            logger.info(f"DEBUG - Geocoding results for '{entity.matched_name}': {len(results)} results")
+            for i, res in enumerate(results[:3]):  # Show first 3 results
+                logger.info(f"DEBUG - Result {i+1}: {res.get('display_name', 'No display_name')[:100]}...")
+            
+            # Select the best city-level result
+            result = self._select_best_city_result(results, entity.matched_name)
             
             # Extract coordinates
             lat = float(result['lat'])
@@ -176,6 +183,33 @@ class NominatimClient:
         height_km = abs(max_lat - min_lat) * 111
         
         return width_km * height_km
+    
+    def _select_best_city_result(self, results: List[Dict], city_name: str) -> Dict:
+        """Select the best city-level result from geocoding results."""
+        city_name_lower = city_name.lower()
+        
+        # Priority 1: Exact city name match with high importance
+        for result in results:
+            display_name = result.get('display_name', '').lower()
+            importance = float(result.get('importance', 0))
+            
+            # Look for results that contain the city name and have high importance
+            if (city_name_lower in display_name and 
+                importance > 0.5 and
+                any(keyword in display_name for keyword in ['city', 'municipality', 'district'])):
+                logger.info(f"Selected city-level result: {result.get('display_name', '')[:100]}...")
+                return result
+        
+        # Priority 2: Any result with high importance
+        for result in results:
+            importance = float(result.get('importance', 0))
+            if importance > 0.7:
+                logger.info(f"Selected high-importance result: {result.get('display_name', '')[:100]}...")
+                return result
+        
+        # Priority 3: First result (fallback)
+        logger.info(f"Using first result as fallback: {results[0].get('display_name', '')[:100]}...")
+        return results[0]
     
     def search_by_query(self, query: str, country_code: str = "in", limit: int = 5) -> List[BoundaryInfo]:
         """Search locations by free-form query.

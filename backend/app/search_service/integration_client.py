@@ -16,7 +16,7 @@ class SearchServiceClient:
     
     def __init__(self, base_url: str = "http://localhost:8001"):
         self.base_url = base_url
-        self.timeout = 30
+        self.timeout = 60  # Increased timeout for enhanced analysis
     
     def get_location_data(
         self, 
@@ -144,6 +144,44 @@ class SearchServiceClient:
             logger.error(f"Error calling complete analysis: {e}")
             return None
     
+    def get_enhanced_analysis(
+        self, 
+        query: str, 
+        locations: List[Dict[str, Any]], 
+        analysis_type: str = "ndvi"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get enhanced analysis with data extraction and validation.
+        
+        Args:
+            query: User query string
+            locations: List of location dictionaries
+            analysis_type: Type of analysis to perform
+            
+        Returns:
+            Enhanced analysis data or None if failed
+        """
+        try:
+            response = requests.post(
+                f"{self.base_url}/search/enhanced-analysis",
+                json={
+                    "query": query,
+                    "locations": locations,
+                    "analysis_type": analysis_type
+                },
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Enhanced analysis failed with status {response.status_code}: {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error calling enhanced analysis: {e}")
+            return None
+
     def health_check(self) -> bool:
         """Check if Search API Service is healthy."""
         try:
@@ -180,20 +218,37 @@ def call_search_service_for_analysis(
             logger.warning("Search API Service not available, using fallback")
             return _fallback_analysis(query, locations, analysis_type)
         
-        # Get complete analysis from Search API Service
-        analysis_data = search_client.get_complete_analysis(query, locations, analysis_type)
+        # Try enhanced analysis first
+        logger.info(f"DEBUG - Calling enhanced analysis with query: '{query}', analysis_type: '{analysis_type}'")
+        analysis_data = search_client.get_enhanced_analysis(query, locations, analysis_type)
         
-        if analysis_data:
+        if analysis_data and analysis_data.get("success", False):
             return {
                 "analysis": analysis_data.get("analysis", "Analysis generation failed"),
                 "roi": analysis_data.get("roi"),
-                "evidence": ["search_service:complete_analysis_success"],
+                "evidence": ["search_service:enhanced_analysis_success"],
                 "sources": analysis_data.get("sources", []),
-                "confidence": analysis_data.get("confidence", 0.0)
+                "confidence": analysis_data.get("confidence", 0.0),
+                "structured_data": analysis_data.get("structured_data", {}),
+                "data_quality": analysis_data.get("data_quality", {}),
+                "extracted_metrics_count": analysis_data.get("extracted_metrics_count", 0)
             }
         else:
-            logger.warning("Search API Service returned no data, using fallback")
-            return _fallback_analysis(query, locations, analysis_type)
+            # Fallback to basic analysis if enhanced fails
+            logger.warning("Enhanced analysis failed, falling back to basic analysis")
+            analysis_data = search_client.get_complete_analysis(query, locations, analysis_type)
+            
+            if analysis_data:
+                return {
+                    "analysis": analysis_data.get("analysis", "Analysis generation failed"),
+                    "roi": analysis_data.get("roi"),
+                    "evidence": ["search_service:complete_analysis_success"],
+                    "sources": analysis_data.get("sources", []),
+                    "confidence": analysis_data.get("confidence", 0.0)
+                }
+            else:
+                logger.warning("Search API Service returned no data, using fallback")
+                return _fallback_analysis(query, locations, analysis_type)
             
     except Exception as e:
         logger.error(f"Error calling Search API Service: {e}")

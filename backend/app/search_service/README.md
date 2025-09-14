@@ -1,31 +1,78 @@
 # Search API Service
 
-A FastAPI-based service that provides web search and location intelligence for the GeoLLM project. This service integrates with Tavily API to provide LLM-optimized web search capabilities.
+A FastAPI-based service that provides web search and location intelligence for the GeoLLM project. This service serves **two critical use cases** in the GeoLLM system architecture.
+
+## Primary Use Cases
+
+### 1. **Nominatim API → Geocoding**
+
+- **Purpose**: Convert location names to precise geographical coordinates and boundaries
+- **Implementation**: Uses Nominatim client for accurate geocoding
+- **Output**: Coordinates, polygon geometry, administrative boundaries, area data
+- **Integration**: Feeds into GEE service for satellite data analysis
+- **Critical for**: Providing accurate ROI (Region of Interest) data to GEE
+
+### 2. **Tavily API → Fallback Analysis**
+
+- **Purpose**: Provide environmental analysis when GEE services fail
+- **Implementation**: Uses Tavily's LLM-optimized web search
+- **Output**: Environmental reports, studies, news, comprehensive analysis
+- **Integration**: Replaces GEE analysis when satellite data is unavailable
+- **Critical for**: Maintaining system functionality during GEE outages
 
 ## Features
 
 - **Location Resolution**: Resolve location names to coordinates, boundaries, and area data
 - **Environmental Context**: Search for environmental reports, studies, and news
 - **Complete Analysis**: Generate comprehensive analysis based on web search data
+- **Nominatim Integration**: Accurate geocoding for GEE service integration
 - **Tavily Integration**: LLM-optimized web search with structured results
 - **Fallback Support**: Provides analysis when GEE/RAG services fail
 
 ## Architecture
 
+The Search Service operates in two distinct modes within the GeoLLM system:
+
+### Use Case 1: Geocoding Flow (Nominatim)
+
+```
+User Query → Core LLM Agent → Location Detection
+    ↓
+Search Service (Nominatim) → Coordinates + Polygon Geometry
+    ↓
+GEE Service → Satellite Data Analysis
+```
+
+### Use Case 2: Fallback Analysis Flow (Tavily)
+
+```
+User Query → Core LLM Agent → GEE Service (Fails)
+    ↓
+Search Service (Tavily) → Web Search + Environmental Context
+    ↓
+LLM Synthesis → Final Analysis Response
+```
+
+### Service Architecture
+
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   User Query    │───▶│  Search Service  │───▶│  LLM Synthesis  │
-│                 │    │   (Tavily API)   │    │   (OpenRouter)  │
+│                 │    │  (Dual Purpose)  │    │   (OpenRouter)  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                               │
-                              ▼
-                    ┌──────────────────┐
-                    │  Enriched Data   │
-                    │  • Web Results   │
-                    │  • Boundaries    │
-                    │  • Reports       │
-                    │  • Context       │
-                    └──────────────────┘
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+            ┌─────────────┐    ┌─────────────┐
+            │ Nominatim   │    │   Tavily    │
+            │ (Geocoding) │    │ (Fallback)  │
+            └─────────────┘    └─────────────┘
+                    │                   │
+                    ▼                   ▼
+            ┌─────────────┐    ┌─────────────┐
+            │ Coordinates │    │ Web Results │
+            │ + Geometry  │    │ + Context   │
+            └─────────────┘    └─────────────┘
 ```
 
 ## Setup
@@ -42,10 +89,17 @@ pip install -r requirements.txt
 Create a `.env` file in the `backend` directory:
 
 ```env
+# Required for Fallback Analysis (Use Case 2)
 TAVILY_API_KEY=your_tavily_api_key_here
+
+# Nominatim (Use Case 1) works without API key
+# Uses free Nominatim service for geocoding
 ```
 
-Get your Tavily API key from: https://tavily.com/
+**API Keys:**
+
+- **Tavily API**: Get your key from https://tavily.com/ (required for fallback analysis)
+- **Nominatim**: No API key required (free service for geocoding)
 
 ### 3. Start the Service
 
@@ -106,6 +160,24 @@ POST /search/complete-analysis
 }
 ```
 
+## Integration with GeoLLM System
+
+The Search API Service plays a critical role in the GeoLLM system by serving two distinct purposes:
+
+### 1. **Geocoding Integration** (Nominatim)
+
+- **When**: Every time a location is detected in user queries
+- **Purpose**: Convert location names to precise coordinates and polygon geometry
+- **Flow**: User Query → Location Detection → Search Service (Nominatim) → GEE Service
+- **Output**: ROI data for satellite analysis
+
+### 2. **Fallback Analysis Integration** (Tavily)
+
+- **When**: When GEE services fail or are unavailable
+- **Purpose**: Provide environmental analysis using web search data
+- **Flow**: User Query → GEE Service (Fails) → Search Service (Tavily) → Analysis Response
+- **Output**: Comprehensive environmental analysis
+
 ## Integration with Core LLM Agent
 
 The Search API Service integrates with the core LLM agent to replace the mocked `websearch_tool_node`.
@@ -133,23 +205,37 @@ def websearch_tool_node(state: AgentState) -> Dict[str, Any]:
 
 ## Service Components
 
-### 1. TavilyClient
+### For Geocoding (Use Case 1)
 
-- Handles Tavily API integration
+#### 1. NominatimClient
+
+- Handles Nominatim API integration for geocoding
+- Provides accurate coordinates and polygon geometry
+- Manages administrative boundary information
+- Essential for GEE service integration
+
+#### 2. LocationResolver
+
+- Resolves location names to geographical data using Nominatim
+- Extracts coordinates, boundaries, and area information
+- Provides fallback data for major Indian cities
+- Generates polygon geometry for GEE processing
+
+### For Fallback Analysis (Use Case 2)
+
+#### 3. TavilyClient
+
+- Handles Tavily API integration for web search
 - Provides both sync and async search methods
 - Manages API rate limits and timeouts
+- Optimized for LLM applications
 
-### 2. LocationResolver
-
-- Resolves location names to geographical data
-- Extracts coordinates, boundaries, and area information
-- Uses web search for comprehensive location data
-
-### 3. ResultProcessor
+#### 4. ResultProcessor
 
 - Processes and categorizes search results
-- Extracts environmental context
-- Generates complete analysis from web data
+- Extracts environmental context from web data
+- Generates complete analysis when GEE fails
+- Categorizes results into reports, studies, and news
 
 ## Testing
 
@@ -160,12 +246,22 @@ cd backend
 python test_search_service.py
 ```
 
-This will test:
+This will test both use cases:
 
-- Health check endpoint
-- Location resolution
-- Environmental context search
+### Geocoding Tests (Use Case 1)
+
+- Location resolution via Nominatim
+- Coordinate extraction and validation
+- Polygon geometry generation
+- Administrative boundary data
+- Fallback data for major cities
+
+### Fallback Analysis Tests (Use Case 2)
+
+- Environmental context search via Tavily
 - Complete analysis generation
+- Web search result processing
+- Report categorization (studies, news, reports)
 - Tavily API integration
 
 ## Configuration

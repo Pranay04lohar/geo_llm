@@ -77,6 +77,7 @@ class ResultFormatter:
                 "analysis": enhanced_analysis,
                 "roi": formatted_roi,
                 "summary": nl_summary,
+                "evidence": evidence,  # Add evidence at top level for tests
                 "metadata": {
                     "query": query,
                     "service_type": intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type),
@@ -326,7 +327,9 @@ class ResultFormatter:
         
         # Service evidence
         service_evidence = service_response.get("evidence", [])
+        logger.info(f"DEBUG - Service evidence: {service_evidence}")
         evidence.extend(service_evidence)
+        logger.info(f"DEBUG - Final evidence after adding service evidence: {evidence}")
         
         # Processing time evidence
         if intent_result.processing_time > 0:

@@ -66,9 +66,23 @@ class LocationResolver:
             logger.info(f"Resolving location: {location_name} ({location_type})")
             
             # Use Nominatim for accurate location data
-            logger.info(f"Calling nominatim_client.search_location for {location_name}")
-            location_data = self.nominatim_client.search_location(location_name, location_type)
-            logger.info(f"Nominatim client returned: {location_data is not None}")
+            logger.info(f"Calling nominatim_client.search_by_query for {location_name}")
+            boundary_infos = self.nominatim_client.search_by_query(location_name, country_code="in", limit=1)
+            logger.info(f"Nominatim client returned: {len(boundary_infos)} results")
+            
+            if boundary_infos:
+                boundary_info = boundary_infos[0]
+                location_data = {
+                    "coordinates": {"lat": boundary_info.center[1], "lng": boundary_info.center[0]},
+                    "boundaries": boundary_info.geometry,
+                    "area_km2": boundary_info.area_km2,
+                    "display_name": boundary_info.display_name,
+                    "place_id": boundary_info.place_id,
+                    "importance": boundary_info.importance,
+                    "location_name": location_name
+                }
+            else:
+                location_data = None
             
             if location_data:
                 logger.info(f"Successfully resolved location via Nominatim: {location_name}")

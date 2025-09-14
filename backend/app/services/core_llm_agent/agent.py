@@ -58,6 +58,14 @@ class CoreLLMAgent:
         self.service_dispatcher = ServiceDispatcher()
         self.result_formatter = ResultFormatter()
         
+        # Log model configuration
+        from .config import get_openrouter_config
+        config = get_openrouter_config()
+        logger.info(f"Model Configuration:")
+        logger.info(f"  NER Model: {config['ner_model']}")
+        logger.info(f"  Intent Model: {config['intent_model']}")
+        logger.info(f"  Response Model: {config['response_model']}")
+        
         logger.info("CoreLLMAgent initialized with modular pipeline")
     
     def process_query(self, query: str) -> Dict[str, Any]:

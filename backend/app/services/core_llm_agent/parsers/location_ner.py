@@ -32,7 +32,8 @@ class LocationNER:
     def __init__(self, model_name: str = None):
         """Initialize the LocationNER with model configuration."""
         config = get_openrouter_config()
-        self.model_name = model_name or config["intent_model"]
+        # Use dedicated NER model for faster, more efficient location extraction
+        self.model_name = model_name or config["ner_model"]
         self.api_key = config["api_key"]
         self.referrer = config["referrer"]
         self.app_title = config["app_title"]
@@ -40,6 +41,81 @@ class LocationNER:
         
         if not self.api_key:
             logger.warning("OPENROUTER_API_KEY not set. Location extraction will fail.")
+        
+        logger.info(f"LocationNER initialized with model: {self.model_name}")
+    
+    def _extract_json_from_content(self, content: str) -> str:
+        """Extract JSON from LLM response content, handling extra text after JSON.
+        
+        Args:
+            content: Raw content from LLM
+            
+        Returns:
+            Extracted JSON string or empty string if not found
+        """
+        content = content.strip()
+        
+        # First, try to parse the entire content as JSON
+        try:
+            json.loads(content)
+            return content
+        except json.JSONDecodeError:
+            pass
+        
+        # Look for JSON array pattern
+        import re
+        
+        # Pattern to find JSON array starting with [
+        array_pattern = r'\[.*?\]'
+        array_matches = re.findall(array_pattern, content, re.DOTALL)
+        
+        for match in array_matches:
+            try:
+                # Validate that this is valid JSON
+                json.loads(match)
+                return match
+            except json.JSONDecodeError:
+                continue
+        
+        # Look for JSON object pattern with "locations" key
+        object_pattern = r'\{[^{}]*"locations"\s*:\s*\[.*?\]\s*\}'
+        object_matches = re.findall(object_pattern, content, re.DOTALL)
+        
+        for match in object_matches:
+            try:
+                # Validate that this is valid JSON
+                json.loads(match)
+                return match
+            except json.JSONDecodeError:
+                continue
+        
+        # If no patterns found, try to find the first complete JSON structure
+        # Look for the first { or [ and try to find the matching closing bracket
+        start_chars = ['{', '[']
+        for start_char in start_chars:
+            start_idx = content.find(start_char)
+            if start_idx != -1:
+                # Find the matching closing bracket
+                bracket_count = 0
+                end_idx = start_idx
+                for i, char in enumerate(content[start_idx:], start_idx):
+                    if char in ['{', '[']:
+                        bracket_count += 1
+                    elif char in ['}', ']']:
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i + 1
+                            break
+                
+                if bracket_count == 0:  # Found matching closing bracket
+                    json_candidate = content[start_idx:end_idx]
+                    try:
+                        json.loads(json_candidate)
+                        return json_candidate
+                    except json.JSONDecodeError:
+                        continue
+        
+        return ""
     
     def extract_locations(self, query: str) -> List[LocationEntity]:
         """Extract location entities from a query string.
@@ -107,8 +183,17 @@ class LocationNER:
             if not content.strip():
                 logger.warning("LLM returned whitespace-only content for location extraction")
                 return []
+            
+            # Try to extract JSON from content (handle cases where LLM adds extra text)
+            json_content = self._extract_json_from_content(content)
+            if not json_content:
+                logger.warning("Could not extract valid JSON from LLM response")
+                logger.warning(f"Original content: {content[:200]}...")
+                return []
+            
+            logger.info(f"Successfully extracted JSON from LLM response: {json_content[:100]}...")
                 
-            parsed = json.loads(content)
+            parsed = json.loads(json_content)
             
             # Handle both array format and object with "locations" key
             if isinstance(parsed, list):
@@ -121,14 +206,25 @@ class LocationNER:
                 
             # Validate and convert to LocationEntity objects
             entities = []
+            seen_names = set()  # Track unique location names to avoid duplicates
+            
             for loc_data in locations_data:
                 if (isinstance(loc_data, dict) and 
                     "matched_name" in loc_data and 
                     "type" in loc_data and 
                     "confidence" in loc_data):
                     try:
+                        matched_name = loc_data["matched_name"].strip()
+                        
+                        # Skip duplicates (case-insensitive)
+                        if matched_name.lower() in seen_names:
+                            logger.info(f"Skipping duplicate location: {matched_name}")
+                            continue
+                        
+                        seen_names.add(matched_name.lower())
+                        
                         entity = LocationEntity(
-                            matched_name=loc_data["matched_name"],
+                            matched_name=matched_name,
                             type=loc_data["type"],
                             confidence=float(loc_data["confidence"])
                         )
