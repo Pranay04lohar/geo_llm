@@ -33,6 +33,7 @@ class RetrieveRequest(BaseModel):
     session_id: str = Field(..., description="Session ID containing the documents")
     query: str = Field(..., min_length=1, max_length=1000, description="Query string to search for")
     k: int = Field(default=5, ge=1, le=50, description="Number of similar documents to retrieve (1-50)")
+    returnVectors: bool = Field(default=False, description="Include vectors for returned chunks")
 
 
 class DocumentResult(BaseModel):
@@ -41,6 +42,8 @@ class DocumentResult(BaseModel):
     metadata: dict = Field(..., description="Document metadata")
     similarity_score: float = Field(..., description="Similarity score (0-1)")
     index_id: int = Field(..., description="Internal document index ID")
+    vector: Optional[list] = Field(default=None, description="Embedding vector if requested")
+    vector_dim: Optional[int] = Field(default=None, description="Embedding dimension if vector included")
 
 
 class RetrieveResponse(BaseModel):
@@ -139,12 +142,27 @@ async def retrieve_documents(
         
         # Convert to response format
         results = []
+        include_vectors = getattr(retrieve_request, "returnVectors", False)
         for doc in similar_docs:
+            vector = None
+            vector_dim = None
+            if include_vectors:
+                # Reconstruct vector from FAISS
+                try:
+                    session_data = rag_store.sessions.get(retrieve_request.session_id)
+                    if session_data and session_data.faiss_index is not None:
+                        vec = session_data.faiss_index.reconstruct(doc["index_id"])
+                        vector = vec.tolist()
+                        vector_dim = rag_store.embedding_dimension
+                except Exception as e:
+                    logger.warning(f"Failed to reconstruct vector for index {doc['index_id']}: {e}")
             result = DocumentResult(
                 content=doc["content"],
                 metadata=doc["metadata"],
                 similarity_score=doc["similarity_score"],
-                index_id=doc["index_id"]
+                index_id=doc["index_id"],
+                vector=vector,
+                vector_dim=vector_dim,
             )
             results.append(result)
         

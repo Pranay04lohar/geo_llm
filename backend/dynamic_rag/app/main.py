@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.routers import ingest_router, retrieve_router
+from app.routers import embeddings_router
 from app.services.rag_store import RAGStore
 from app.config import settings
 
@@ -61,6 +62,7 @@ app.add_middleware(
 # Include routers
 app.include_router(ingest_router.router, prefix="/api/v1", tags=["ingestion"])
 app.include_router(retrieve_router.router, prefix="/api/v1", tags=["retrieval"])
+app.include_router(embeddings_router.router, prefix="/api/v1", tags=["embeddings"])
 
 
 @app.get("/")

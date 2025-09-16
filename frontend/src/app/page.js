@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { uploadFiles as ragUploadFiles, getSessionStats as ragGetSessionStats } from '@/utils/api'
 import AnimatedEarth from '@/components/AnimatedEarth'
 import CollapsibleSidebar from '@/components/CollapsibleSidebar'
 import MapView from '@/components/MapView'
@@ -21,6 +22,8 @@ export default function Home() {
   const messagesEndRef = useRef(null)
   const [showFullScreen, setShowFullScreen] = useState(false)
   const [roiData, setRoiData] = useState([])
+  const [ragSessionId, setRagSessionId] = useState('')
+  const [ragMessage, setRagMessage] = useState('')
 
   // Load from localStorage after hydration
   useEffect(() => {
@@ -373,37 +376,52 @@ export default function Home() {
                     >
                       <input
                         type="file"
-                        accept=".geojson,.json,.shp,.zip,.tif,.tiff"
+                        multiple
+                        accept=".geojson,.json,.shp,.zip,.tif,.tiff,.pdf,.txt,.docx,.md"
                         className="hidden"
                         onChange={async (event) => {
-                          const file = event.target.files?.[0]
-                          if (!file) return
-                          const name = file.name.toLowerCase()
+                          const files = Array.from(event.target.files || [])
+                          if (files.length === 0) return
+                          const lower = files.map(f => f.name.toLowerCase())
+                          const isRag = lower.some(n => n.endsWith('.pdf') || n.endsWith('.txt') || n.endsWith('.docx') || n.endsWith('.md'))
                           try {
-                            if (name.endsWith('.geojson') || name.endsWith('.json')) {
-                              const text = await file.text()
-                              const data = JSON.parse(text)
-                              const fc = data.type === 'FeatureCollection' ? data : { type: 'FeatureCollection', features: [data] }
-                              setRoiData((prev) => {
-                                const base = prev.length
-                                const newItems = fc.features.map((feat, idx) => ({
-                                  id: `roi-${base + idx + 1}`,
-                                  name: feat.properties?.name || `ROI ${base + idx + 1}`,
-                                  geojson: feat,
-                                  color: '#3498db',
-                                }))
-                                return [...prev, ...newItems]
-                              })
-                              setShowFullScreen(true)
-                            } else if (name.endsWith('.tif') || name.endsWith('.tiff')) {
-                              alert('TIFF upload is not yet supported in the frontend. Consider server-side processing.')
-                            } else if (name.endsWith('.shp') || name.endsWith('.zip')) {
-                              alert('Shapefile upload is not yet supported in the frontend. Please convert to GeoJSON.')
+                            if (isRag) {
+                              const selected = files.slice(0, 2)
+                              const res = await ragUploadFiles(selected)
+                              setRagSessionId(res.session_id)
+                              setRagMessage(`Processed ${res.files_processed} files · ${res.documents_extracted} chunks`)
+                              if (typeof window !== 'undefined') {
+                                localStorage.setItem('rag_session_id', res.session_id)
+                              }
+                              try { await ragGetSessionStats(res.session_id) } catch {}
                             } else {
-                              alert('Unsupported file type. Please upload GeoJSON.')
+                              const file = files[0]
+                              const name = file.name.toLowerCase()
+                              if (name.endsWith('.geojson') || name.endsWith('.json')) {
+                                const text = await file.text()
+                                const data = JSON.parse(text)
+                                const fc = data.type === 'FeatureCollection' ? data : { type: 'FeatureCollection', features: [data] }
+                                setRoiData((prev) => {
+                                  const base = prev.length
+                                  const newItems = fc.features.map((feat, idx) => ({
+                                    id: `roi-${base + idx + 1}`,
+                                    name: feat.properties?.name || `ROI ${base + idx + 1}`,
+                                    geojson: feat,
+                                    color: '#3498db',
+                                  }))
+                                  return [...prev, ...newItems]
+                                })
+                                setShowFullScreen(true)
+                              } else if (name.endsWith('.tif') || name.endsWith('.tiff')) {
+                                alert('TIFF upload is not yet supported in the frontend. Consider server-side processing.')
+                              } else if (name.endsWith('.shp') || name.endsWith('.zip')) {
+                                alert('Shapefile upload is not yet supported in the frontend. Please convert to GeoJSON.')
+                              } else {
+                                alert('Unsupported file type. Please upload GeoJSON or RAG-supported files (.pdf, .txt, .docx, .md).')
+                              }
                             }
                           } catch (e) {
-                            alert('Failed to read file. Ensure it is valid GeoJSON.')
+                            alert('Upload failed. ' + (e?.message || ''))
                           } finally {
                             event.target.value = ''
                           }
@@ -473,6 +491,11 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 mt-6 justify-center">
+                  {ragSessionId && (
+                    <div className="text-white/80 text-sm px-4 py-2 rounded-xl bg-white/10 border border-white/15">
+                      RAG session: <span className="font-mono">{ragSessionId}</span>{ragMessage ? ` · ${ragMessage}` : ''}
+                    </div>
+                  )}
                   <button className="text-white/60 text-sm flex items-center gap-2 transition-all duration-200 px-4 py-2 rounded-xl hover:scale-105 hover:bg-white/10">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
