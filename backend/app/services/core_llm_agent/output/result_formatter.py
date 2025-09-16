@@ -6,6 +6,8 @@ ensuring a unified output format regardless of the underlying service used.
 """
 
 import time
+import os
+import json
 import logging
 from typing import Dict, Any, List, Optional
 
@@ -55,9 +57,19 @@ class ResultFormatter:
             analysis = service_response.get("analysis", "Analysis completed")
             roi = service_response.get("roi")
             
+            # Optionally post-process analysis via response LLM using structured data
+            llm_analysis = self._maybe_generate_response_llm(
+                query=query,
+                intent_result=intent_result,
+                location_result=location_result,
+                service_response=service_response,
+                total_processing_time=total_processing_time,
+                fallback_text=analysis,
+            )
+
             # Enhance analysis with metadata if needed
             enhanced_analysis = self._enhance_analysis(
-                analysis, query, intent_result, location_result, total_processing_time
+                llm_analysis, query, intent_result, location_result, total_processing_time
             )
             
             # Format ROI if needed
@@ -111,6 +123,90 @@ class ResultFormatter:
         except Exception as e:
             logger.error(f"Error formatting final result: {e}")
             return self._error_result(query, str(e), total_processing_time)
+
+    def _maybe_generate_response_llm(
+        self,
+        query: str,
+        intent_result: IntentResult,
+        location_result: LocationParseResult,
+        service_response: Dict[str, Any],
+        total_processing_time: float,
+        fallback_text: str,
+    ) -> str:
+        """Optionally use a response LLM to produce a final narrative from structured data.
+
+        Controlled via env flag ENABLE_RESPONSE_LLM. Falls back to provided text on error.
+        """
+        try:
+            if os.environ.get("ENABLE_RESPONSE_LLM", "false").lower() not in ("1", "true", "yes"):  # disabled by default
+                return fallback_text
+
+            # Import OpenRouter config lazily
+            try:
+                from app.services.core_llm_agent.config import get_openrouter_config
+            except Exception as e:  # pragma: no cover
+                logger.warning(f"Response LLM disabled: cannot load config ({e})")
+                return fallback_text
+
+            cfg = get_openrouter_config()
+            api_key = cfg.get("api_key", "").strip()
+            model = cfg.get("response_model")
+            if not api_key or not model:
+                logger.warning("Response LLM disabled: missing API key or response model")
+                return fallback_text
+
+            base_url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": cfg.get("referrer") or "http://localhost",
+                "X-Title": cfg.get("app_title") or "GeoLLM Agent",
+            }
+
+            # Build compact structured context
+            context: Dict[str, Any] = {
+                "query": query,
+                "analysis_type": getattr(intent_result, 'analysis_type', None),
+                "locations": [getattr(e, 'matched_name', None) for e in location_result.entities] if getattr(location_result, 'entities', None) else [],
+                "analysis_data": service_response.get("analysis_data", {}),
+                "service_result_keys": list(service_response.keys()),
+                "map_stats": service_response.get("service_result", {}).get("mapStats", {}),
+                "tile_url": service_response.get("service_result", {}).get("urlFormat") or service_response.get("analysis_data", {}).get("tile_url"),
+                "datasets_used": service_response.get("service_result", {}).get("datasets_used", []),
+            }
+
+            system_prompt = (
+                "You are a geospatial analysis writer. Given structured analysis data and map stats, write a concise, factual narrative tailored to the user's query. "
+                "Do not invent numbers. Use only provided metrics. Include key metrics (means, percentages, dominant classes, UHI) and what they imply. If a tile_url is present, note that a map layer is available. Keep it under 10 sentences."
+            )
+
+            user_content = json.dumps(context, ensure_ascii=False)
+
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Context JSON:\n{user_content}\n\nWrite the final analysis."},
+                ],
+                "temperature": 0.2,
+            }
+
+            import requests
+            resp = requests.post(base_url, headers=headers, data=json.dumps(payload), timeout=25)
+            resp.raise_for_status()
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                return content
+            return fallback_text
+        except Exception as e:  # pragma: no cover
+            logger.warning(f"Response LLM failed; using fallback text: {e}")
+            return fallback_text
 
     def _build_natural_language_summary(self, intent_result: IntentResult, service_response: Dict[str, Any]) -> str:
         """Create a concise natural language summary based on analysis_data, handling errors gracefully."""

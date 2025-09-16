@@ -49,11 +49,11 @@ def get_openrouter_config():
         # NER model - smaller, faster model for location extraction
         "ner_model": os.environ.get("OPENROUTER_NER_MODEL", "meta-llama/llama-3.2-3b-instruct:free"),
         # Intent classification model - medium model for intent understanding
-        "intent_model": os.environ.get("OPENROUTER_INTENT_MODEL", "meta-llama/llama-3.2-7b-instruct:free"),
+        "intent_model": os.environ.get("OPENROUTER_INTENT_MODEL", "meta-llama/llama-3.2-3b-instruct:free"),
         # Response generation model - larger model for complex analysis
         "response_model": os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free"),
         # Planner model - for backward compatibility
-        "planner_model": os.environ.get("OPENROUTER_PLANNER_MODEL", os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free")),
+        "planner_model": os.environ.get("OPENROUTER_PLANNER_MODEL", os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free")), 
         "referrer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
         "app_title": os.environ.get("OPENROUTER_APP_TITLE", "GeoLLM Agent")
     }

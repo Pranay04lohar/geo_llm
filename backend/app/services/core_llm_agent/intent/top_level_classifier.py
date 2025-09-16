@@ -76,13 +76,14 @@ class TopLevelClassifier:
             "You are an intent classifier for a geospatial assistant. "
             "Given a user query, respond ONLY with a compact JSON object of the form\n"
             "{\"intent\": \"GEE|RAG|SEARCH\", \"confidence\": 0.95, \"reasoning\": \"brief explanation\"}.\n"
-            "Rules:\n"
-            "- GEE: geospatial analysis tasks (ROI, polygon, coordinates, lat/lng, map analysis, NDVI, LULC, temperature, satellite data).\n"
-            "- RAG: factual/policy/definition queries or document-based information (laws, regulations, historical data).\n"
-            "- SEARCH: external, live, or timely info (weather, latest news, current events, real-time data).\n"
+            "Decision Policy (strict):\n"
+            "- GEE: Choose for geospatial analysis tasks (ROI/polygon/coordinates, lat/lng, map analysis, NDVI, LULC, LST/temperature, satellite/imagery).\n"
+            "- SEARCH: Choose for any timely, live, or update-oriented info (latest, current, today, now, news, weather, recent, real-time, updates).\n"
+            "- RAG: Choose ONLY if the user explicitly asks to use RAG (e.g., 'use rag', 'use rag data', 'use rag service'). If not explicitly requested, DO NOT choose RAG.\n"
+            "- Never choose RAG for generic questions; prefer SEARCH for time-sensitive info and GEE for geospatial analyses.\n"
             "- confidence: 0.0-1.0 score for classification certainty.\n"
-            "- reasoning: 1-2 sentence explanation.\n"
-            "No extra text, JSON only."
+            "- reasoning: 1 short sentence.\n"
+            "Output JSON only."
         )
         
         payload = {
@@ -212,10 +213,10 @@ class TopLevelClassifier:
             "geospatial", "map", "imagery", "analysis", "greenness", "thermal"
         ]
         
-        # RAG keywords  
+        # RAG keywords - only when user explicitly requests RAG usage
         rag_keywords = [
-            "policy", "law", "regulation", "define", "explain", "what is",
-            "definition", "document", "report", "historical", "background"
+            "use rag", "userag", "rag service", "use rag data", "use the rag",
+            "please use rag", "with rag", "via rag"
         ]
         
         # Search keywords
@@ -229,10 +230,14 @@ class TopLevelClassifier:
         rag_score = sum(1 for keyword in rag_keywords if keyword in query_lower)
         search_score = sum(1 for keyword in search_keywords if keyword in query_lower)
         
-        # Determine best match
-        if gee_score > rag_score and gee_score > search_score:
+        # Hard preference: timely/update keywords -> SEARCH
+        if search_score > 0 and search_score >= max(gee_score, rag_score):
+            return ServiceType.SEARCH
+        # Geospatial content -> GEE
+        if gee_score > 0 and gee_score >= max(search_score, rag_score):
             return ServiceType.GEE
-        elif rag_score > search_score:
+        # Explicit RAG invocation cues -> RAG
+        if rag_score > 0:
             return ServiceType.RAG
-        else:
-            return ServiceType.SEARCH  # Default to search for ambiguous queries
+        # Default to SEARCH for ambiguity
+        return ServiceType.SEARCH
