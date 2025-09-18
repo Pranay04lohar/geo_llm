@@ -49,8 +49,20 @@ class ServiceDispatcher:
                 logger.warning(f"GEE services not available: {e}")
                 self.gee_services_available = False
             
-            # RAG service (planned, not yet implemented)
-            self.rag_service_available = False
+            # RAG service integration
+            try:
+                from ..rag.rag_sync_wrapper import create_sync_rag_service
+                self.rag_service = create_sync_rag_service()
+                # Test if service is actually available
+                self.rag_service_available = self.rag_service.is_available()
+                if self.rag_service_available:
+                    logger.info("RAG service available for integration")
+                else:
+                    logger.warning("RAG service initialized but not available (service may be down)")
+            except ImportError as e:
+                logger.warning(f"RAG service not available: {e}")
+                self.rag_service_available = False
+                self.rag_service = None
             
             self.services_initialized = True
             logger.info("Service dispatcher initialized successfully")
@@ -360,7 +372,7 @@ class ServiceDispatcher:
         intent_result: IntentResult, 
         location_result: LocationParseResult
     ) -> Dict[str, Any]:
-        """Dispatch to RAG service (placeholder - not yet implemented).
+        """Dispatch to RAG service for document-based question answering.
         
         Args:
             query: Original user query
@@ -368,33 +380,53 @@ class ServiceDispatcher:
             location_result: Location parsing result
             
         Returns:
-            RAG service response (mocked for now)
+            RAG service response with grounded answer and sources
         """
-        logger.info("Dispatching to RAG service (not yet implemented)")
+        logger.info("Dispatching to RAG service for document-based analysis")
         
-        # Extract location names for context
-        location_names = [entity.matched_name for entity in location_result.entities]
-        location_text = f"related to {', '.join(location_names)} " if location_names else ""
+        if not self.rag_service_available:
+            # Fallback response when RAG service is not available
+            location_names = [entity.matched_name for entity in location_result.entities]
+            location_text = f"related to {', '.join(location_names)} " if location_names else ""
+            
+            return {
+                "analysis": (
+                    f"📚 RAG Analysis {location_text}\n"
+                    f"{'=' * 50}\n"
+                    f"⚠️ RAG service is currently unavailable\n"
+                    f"📝 Query: {query}\n"
+                    f"📍 Locations: {', '.join(location_names) if location_names else 'None detected'}\n\n"
+                    f"💡 The RAG service provides:\n"
+                    f"   • Document-based knowledge retrieval\n"
+                    f"   • Policy and regulation information\n"
+                    f"   • Historical data and context\n"
+                    f"   • Factual question answering\n\n"
+                    f"🔧 Please ensure the RAG service is running and try again."
+                ),
+                "roi": None,
+                "evidence": ["rag_service:unavailable"],
+                "sources": [],
+                "confidence": 0.0
+            }
         
-        return {
-            "analysis": (
-                f"📚 RAG Analysis {location_text}\n"
-                f"{'=' * 50}\n"
-                f"⚠️ RAG service not yet implemented\n"
-                f"📝 Query: {query}\n"
-                f"📍 Locations: {', '.join(location_names) if location_names else 'None detected'}\n\n"
-                f"💡 This service will provide:\n"
-                f"   • Document-based knowledge retrieval\n"
-                f"   • Policy and regulation information\n"
-                f"   • Historical data and context\n"
-                f"   • Factual question answering\n\n"
-                f"🔧 RAG service implementation is planned for future release."
-            ),
-            "roi": None,
-            "evidence": ["rag_service:not_implemented"],
-            "sources": [],
-            "confidence": 0.0
-        }
+        try:
+            # Call the synchronous RAG service wrapper
+            response = self.rag_service.ask(
+                query=query,
+                intent_result=intent_result,
+                location_result=location_result,
+                k=5,
+                temperature=0.7
+            )
+            
+            logger.info(f"RAG service response received with confidence: {response.get('confidence', 0.0)}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error calling RAG service: {e}")
+            # Fallback to search service on error
+            logger.info("Falling back to search service due to RAG error")
+            return self._dispatch_search(query, intent_result, location_result)
     
     def _dispatch_search(
         self, 

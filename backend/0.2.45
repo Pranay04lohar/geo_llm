@@ -1,0 +1,74 @@
+Requirement already satisfied: langchain-core in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (0.1.53)
+Collecting langchain-core
+  Downloading langchain_core-0.3.76-py3-none-any.whl.metadata (3.7 kB)
+Collecting langchain
+  Downloading langchain-0.3.27-py3-none-any.whl.metadata (7.8 kB)
+Requirement already satisfied: langgraph in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (0.0.39)
+Collecting langgraph
+  Downloading langgraph-0.6.7-py3-none-any.whl.metadata (6.8 kB)
+Collecting langsmith>=0.3.45 (from langchain-core)
+  Downloading langsmith-0.4.28-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: tenacity!=8.4.0,<10.0.0,>=8.1.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (8.5.0)
+Requirement already satisfied: jsonpatch<2.0,>=1.33 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (1.33)
+Requirement already satisfied: PyYAML>=5.3 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (6.0.2)
+Requirement already satisfied: typing-extensions>=4.7 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (4.15.0)
+Requirement already satisfied: packaging>=23.2 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (23.2)
+Requirement already satisfied: pydantic>=2.7.4 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain-core) (2.11.9)
+Requirement already satisfied: jsonpointer>=1.9 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from jsonpatch<2.0,>=1.33->langchain-core) (3.0.0)
+Collecting langchain-text-splitters<1.0.0,>=0.3.9 (from langchain)
+  Downloading langchain_text_splitters-0.3.11-py3-none-any.whl.metadata (1.8 kB)
+Collecting SQLAlchemy<3,>=1.4 (from langchain)
+  Downloading sqlalchemy-2.0.43-cp312-cp312-win_amd64.whl.metadata (9.8 kB)
+Requirement already satisfied: requests<3,>=2 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langchain) (2.31.0)
+Requirement already satisfied: annotated-types>=0.6.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from pydantic>=2.7.4->langchain-core) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.2 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from pydantic>=2.7.4->langchain-core) (2.33.2)
+Requirement already satisfied: typing-inspection>=0.4.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from pydantic>=2.7.4->langchain-core) (0.4.1)
+Requirement already satisfied: charset-normalizer<4,>=2 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from requests<3,>=2->langchain) (3.4.3)
+Requirement already satisfied: idna<4,>=2.5 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from requests<3,>=2->langchain) (3.10)
+Requirement already satisfied: urllib3<3,>=1.21.1 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from requests<3,>=2->langchain) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from requests<3,>=2->langchain) (2025.8.3)
+Collecting greenlet>=1 (from SQLAlchemy<3,>=1.4->langchain)
+  Downloading greenlet-3.2.4-cp312-cp312-win_amd64.whl.metadata (4.2 kB)
+Requirement already satisfied: langgraph-checkpoint<3.0.0,>=2.1.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph) (2.1.1)
+Requirement already satisfied: langgraph-prebuilt<0.7.0,>=0.6.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph) (0.6.4)
+Collecting langgraph-sdk<0.3.0,>=0.2.2 (from langgraph)
+  Downloading langgraph_sdk-0.2.8-py3-none-any.whl.metadata (1.5 kB)
+Requirement already satisfied: xxhash>=3.5.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph) (3.5.0)
+Requirement already satisfied: ormsgpack>=1.10.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph-checkpoint<3.0.0,>=2.1.0->langgraph) (1.10.0)
+Requirement already satisfied: httpx>=0.25.2 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph-sdk<0.3.0,>=0.2.2->langgraph) (0.28.1)
+Requirement already satisfied: orjson>=3.10.1 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langgraph-sdk<0.3.0,>=0.2.2->langgraph) (3.11.2)
+Requirement already satisfied: anyio in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from httpx>=0.25.2->langgraph-sdk<0.3.0,>=0.2.2->langgraph) (3.7.1)
+Requirement already satisfied: httpcore==1.* in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from httpx>=0.25.2->langgraph-sdk<0.3.0,>=0.2.2->langgraph) (1.0.9)
+Requirement already satisfied: h11>=0.16 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from httpcore==1.*->httpx>=0.25.2->langgraph-sdk<0.3.0,>=0.2.2->langgraph) (0.16.0)
+Requirement already satisfied: requests-toolbelt>=1.0.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langsmith>=0.3.45->langchain-core) (1.0.0)
+Requirement already satisfied: zstandard>=0.23.0 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from langsmith>=0.3.45->langchain-core) (0.23.0)
+Requirement already satisfied: sniffio>=1.1 in c:\d\programming\projects\geospatial llm\geo_llm\backend\venv\lib\site-packages (from anyio->httpx>=0.25.2->langgraph-sdk<0.3.0,>=0.2.2->langgraph) (1.3.1)
+Downloading langchain_core-0.3.76-py3-none-any.whl (447 kB)
+Downloading langchain-0.3.27-py3-none-any.whl (1.0 MB)
+   ---------------------------------------- 1.0/1.0 MB 4.8 MB/s  0:00:00
+Downloading langchain_text_splitters-0.3.11-py3-none-any.whl (33 kB)
+Downloading sqlalchemy-2.0.43-cp312-cp312-win_amd64.whl (2.1 MB)
+   ---------------------------------------- 2.1/2.1 MB 5.0 MB/s  0:00:00
+Downloading langgraph-0.6.7-py3-none-any.whl (153 kB)
+Downloading langgraph_sdk-0.2.8-py3-none-any.whl (56 kB)
+Downloading greenlet-3.2.4-cp312-cp312-win_amd64.whl (299 kB)
+Downloading langsmith-0.4.28-py3-none-any.whl (384 kB)
+Installing collected packages: greenlet, SQLAlchemy, langsmith, langgraph-sdk, langchain-core, langchain-text-splitters, langchain, langgraph
+  Attempting uninstall: langsmith
+    Found existing installation: langsmith 0.1.147
+    Uninstalling langsmith-0.1.147:
+      Successfully uninstalled langsmith-0.1.147
+  Attempting uninstall: langgraph-sdk
+    Found existing installation: langgraph-sdk 0.2.0
+    Uninstalling langgraph-sdk-0.2.0:
+      Successfully uninstalled langgraph-sdk-0.2.0
+  Attempting uninstall: langchain-core
+    Found existing installation: langchain-core 0.1.53
+    Uninstalling langchain-core-0.1.53:
+      Successfully uninstalled langchain-core-0.1.53
+  Attempting uninstall: langgraph
+    Found existing installation: langgraph 0.0.39
+    Uninstalling langgraph-0.0.39:
+      Successfully uninstalled langgraph-0.0.39
+
+Successfully installed SQLAlchemy-2.0.43 greenlet-3.2.4 langchain-0.3.27 langchain-core-0.3.76 langchain-text-splitters-0.3.11 langgraph-0.6.7 langgraph-sdk-0.2.8 langsmith-0.4.28
