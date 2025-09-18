@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { FaTrashAlt } from "react-icons/fa";
+import { FaTrashAlt, FaExpand } from "react-icons/fa";
 import "../styles/MapView.css";
+import FullScreenMap from "./FullScreenMap";
 
 function App() {
   const mapContainer = useRef(null);
@@ -16,6 +17,7 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingCoords, setDrawingCoords] = useState([]);
   const [mapStyle, setMapStyle] = useState("satellite"); // 'satellite' or 'map'
+  const [showFullScreen, setShowFullScreen] = useState(false);
 
   // Refs to hold the latest state for map event listeners to prevent stale closures
   const isDrawingRef = useRef(isDrawing);
@@ -33,7 +35,7 @@ function App() {
   // Center of India (near Nagpur)
   const [lng] = useState(78.9629);
   const [lat] = useState(20.5937);
-  const [zoom] = useState(1);
+  const [zoom] = useState(4);
 
   // Expanded bounds
   const indiaBounds = [
@@ -48,7 +50,8 @@ function App() {
       !googleMapsApiKey ||
       googleMapsApiKey === "your_google_maps_api_key_here"
     ) {
-      return createOpenStreetMapStyle();
+      console.warn("Google Maps API key not found. Please add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to your .env.local file");
+      return createFallbackStyle();
     }
     return {
       version: 8,
@@ -59,6 +62,7 @@ function App() {
             `https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&key=${googleMapsApiKey}`,
           ],
           tileSize: 256,
+          maxzoom: 20,
         },
       },
       layers: [
@@ -77,7 +81,8 @@ function App() {
       !googleMapsApiKey ||
       googleMapsApiKey === "your_google_maps_api_key_here"
     ) {
-      return createOpenStreetMapStyle();
+      console.warn("Google Maps API key not found. Please add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to your .env.local file");
+      return createFallbackStyle();
     }
     return {
       version: 8,
@@ -88,6 +93,7 @@ function App() {
             `https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&key=${googleMapsApiKey}`,
           ],
           tileSize: 256,
+          maxzoom: 20,
         },
       },
       layers: [
@@ -100,17 +106,18 @@ function App() {
     };
   };
 
-  const createOpenStreetMapStyle = () => ({
+  const createFallbackStyle = () => ({
     version: 8,
     sources: {
-      osm: {
+      fallback: {
         type: "raster",
-        tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"],
         tileSize: 256,
-        attribution: "© OpenStreetMap",
+        attribution: "© Esri",
+        maxzoom: 19,
       },
     },
-    layers: [{ id: "osm-layer", type: "raster", source: "osm" }],
+    layers: [{ id: "fallback-layer", type: "raster", source: "fallback" }],
   });
 
   const getCurrentMapStyle = useCallback(() => {
@@ -254,13 +261,15 @@ function App() {
         color: getROIColor(currentCounter),
       };
 
+      console.log("Creating new ROI:", newROI);
+
       // Add to ROI list and increment counter
       setRoiList((prev) => {
-        console.log(
-          `Adding ${newROI.name} to ROI list. Current list length: ${prev.length}`
-        );
-        return [...prev, newROI];
+        const newList = [...prev, newROI];
+        console.log(`ROI list updated. Total ROIs: ${newList.length}`);
+        return newList;
       });
+      
       setRoiCounter((prev) => {
         const newCounter = prev + 1;
         console.log(`ROI counter updated from ${prev} to ${newCounter}`);
@@ -295,14 +304,20 @@ function App() {
       center: [lng, lat],
       zoom: zoom,
       minZoom: 1,
-      maxZoom: 18,
+      maxZoom: 20, // Google Maps supports higher zoom levels
     });
 
     map.current.setMaxBounds(indiaBounds);
 
     map.current.on("load", () => {
+      console.log("Map loaded successfully");
       setMapLoaded(true);
       setupDrawingLayers();
+    });
+
+    map.current.on("error", (e) => {
+      console.error("Map error:", e);
+      setMapError("Failed to load map. Please check your internet connection.");
     });
 
     return () => {
@@ -440,7 +455,10 @@ function App() {
       return;
     }
 
-    // Multiple ROIs are supported, so no confirmation needed
+    // Cancel any existing drawing first
+    if (isDrawing) {
+      cancelDrawing();
+    }
 
     // Ensure drawing layers exist
     if (!map.current.getSource("drawing")) {
@@ -531,14 +549,41 @@ function App() {
     setRoiCounter(1);
   };
 
-  const exportROI = () => {
+  const submitROIToBackend = async (roiData) => {
+    try {
+      console.log("Submitting ROI to backend...");
+      const response = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          geojson: roiData,
+          query: "Analyze this region",
+          timestamp: new Date().toISOString()
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('Backend response:', result);
+      alert('ROI submitted successfully!');
+      return result;
+    } catch (error) {
+      console.error('Error submitting ROI to backend:', error);
+      alert('Failed to submit ROI to backend. Please try again.');
+    }
+  };
+
+  const exportROI = async () => {
     if (roiList.length === 0) {
       alert("No ROI polygons drawn yet.");
       return;
     }
 
     console.log(
-      `=== Exporting ${roiList.length} ROI${roiList.length > 1 ? "s" : ""} ===`
+      `=== Exporting ${roiList.length} ROI${roiList.length > 1 ? "s" : ""} to Backend ===`
     );
 
     const exportData = {
@@ -561,8 +606,11 @@ function App() {
       }),
     };
 
-    console.log("All ROIs Export (clean coordinates):");
-    console.log(JSON.stringify(exportData, null, 2));
+    // Submit to backend
+    await submitROIToBackend(exportData);
+    
+    // Also log to console for debugging
+    console.log("ROI Data submitted to backend:", exportData);
 
     // Individual ROI summaries
     roiList.forEach((roi) => {
@@ -573,16 +621,34 @@ function App() {
     });
   };
 
+  const openFullScreenMap = () => {
+    setShowFullScreen(true);
+  };
+
+  const closeFullScreenMap = () => {
+    setShowFullScreen(false);
+  };
+
+  const handleFullScreenExport = (fullScreenRoiList) => {
+    setRoiList(fullScreenRoiList);
+    setRoiCounter(fullScreenRoiList.length + 1);
+    setShowFullScreen(false);
+  };
+
   return (
-    <div className="app">
-      <div className="controls">
+    <div className="h-full flex flex-col">
+      <div className="p-4 bg-black/20 backdrop-blur-sm border-b border-white/10 flex gap-2 flex-wrap">
         {mapLoaded && (
           <>
-            <button className="btn btn-info" onClick={toggleMapStyle}>
+            <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105" onClick={toggleMapStyle}>
               {mapStyle === "satellite" ? "🗺️ Map View" : "🛰️ Satellite View"}
             </button>
             <button
-              className={`btn ${isDrawing ? "btn-warning" : "btn-secondary"}`}
+              className={`rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 ${
+                isDrawing 
+                  ? "bg-orange-500/20 text-orange-400 border border-orange-500/30" 
+                  : "bg-white/10 text-white border border-white/15 hover:bg-white/15"
+              }`}
               onClick={isDrawing ? cancelDrawing : startDrawing}
             >
               {isDrawing ? "❌ Cancel Drawing" : `✏️ Draw ROI ${roiCounter}`}
@@ -590,53 +656,80 @@ function App() {
           </>
         )}
         <button
-          className="btn btn-primary"
+          className={`rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 ${
+            roiList.length === 0
+              ? "bg-gray-500/20 text-gray-400 border border-gray-500/30 cursor-not-allowed"
+              : "bg-gradient-to-r from-blue-600 to-cyan-600 text-white border border-blue-500/30"
+          }`}
           onClick={exportROI}
           disabled={roiList.length === 0}
         >
           📤 Export All ROIs ({roiList.length})
         </button>
-        <button className="btn" onClick={clearAll} disabled={!mapLoaded}>
+        <button 
+          className={`rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 flex items-center gap-2 ${
+            !mapLoaded
+              ? "bg-gray-500/20 text-gray-400 border border-gray-500/30 cursor-not-allowed"
+              : "bg-white/10 text-white border border-white/15 hover:bg-white/15"
+          }`}
+          onClick={clearAll} 
+          disabled={!mapLoaded}
+        >
           <FaTrashAlt /> Clear All
+        </button>
+        
+        <button 
+          className={`rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 flex items-center gap-2 ${
+            !mapLoaded
+              ? "bg-gray-500/20 text-gray-400 border border-gray-500/30 cursor-not-allowed"
+              : "bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-500/30"
+          }`}
+          onClick={openFullScreenMap} 
+          disabled={!mapLoaded}
+        >
+          <FaExpand /> Open Full Screen
         </button>
       </div>
 
       {mapError && (
-        <div className="error">
-          <p>Error loading map: {mapError}</p>
+        <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-4 m-4">
+          <p className="text-red-400 text-sm">Error loading map: {mapError}</p>
         </div>
       )}
 
       {!mapLoaded && !mapError && (
         <div className="loading">
-          <p>Loading map...</p>
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+            <p>Loading map...</p>
+          </div>
         </div>
       )}
 
       {isDrawing && (
-        <div className="drawing-instructions">
-          <p>✏️ Drawing Mode: Click to add points. Double-click to finish.</p>
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-xl z-50 backdrop-blur-sm border border-white/10">
+          <p className="text-sm">✏️ Drawing Mode: Click to add points. Double-click to finish.</p>
         </div>
       )}
 
       {roiList.length > 0 && (
-        <div className="roi-list">
-          <h3>Active ROIs ({roiList.length})</h3>
+        <div className="bg-black/20 backdrop-blur-sm border-t border-white/10 p-4">
+          <h3 className="text-white font-semibold text-sm mb-3">Active ROIs ({roiList.length})</h3>
           {roiList.map((roi) => (
-            <div key={roi.id} className="roi-item">
+            <div key={roi.id} className="bg-white/8 rounded-xl p-3 mb-2 flex items-center gap-3">
               <span
-                className="roi-color"
+                className="w-4 h-4 rounded-full flex-shrink-0"
                 style={{ backgroundColor: roi.color }}
               ></span>
               <span
-                className="roi-name"
+                className="text-white/90 text-sm flex-1 cursor-pointer hover:text-white transition-colors"
                 onClick={() => renameROI(roi.id)}
                 title={`Click to rename ${roi.name}`}
               >
                 {roi.name}
               </span>
               <button
-                className="roi-delete"
+                className="text-white/60 hover:text-red-400 transition-colors p-1 rounded"
                 onClick={() => {
                   if (
                     window.confirm(
@@ -655,7 +748,18 @@ function App() {
         </div>
       )}
 
-      <div ref={mapContainer} style={{ width: "100%", height: "100vh" }} />
+      <div className="flex-1 relative">
+        <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+      </div>
+
+      {/* Full Screen Map Overlay */}
+      {showFullScreen && (
+        <FullScreenMap
+          roiData={roiList}
+          onClose={closeFullScreenMap}
+          onExport={handleFullScreenExport}
+        />
+      )}
     </div>
   );
 }

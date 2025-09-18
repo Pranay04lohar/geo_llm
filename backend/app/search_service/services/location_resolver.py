@@ -17,7 +17,18 @@ from typing import Dict, Any, Optional, List
 import re
 import json
 from .tavily_client import TavilyClient
-from .nominatim_client import NominatimClient
+# Reuse the Core LLM Agent's Nominatim client to avoid drift and ensure
+# consistent ROI extraction. This client provides search_by_query.
+try:
+    from app.services.core_llm_agent.parsers.nominatim_client import NominatimClient
+except ImportError:
+    # When running the search service standalone, ensure backend root is on sys.path
+    import sys
+    from pathlib import Path
+    backend_root = Path(__file__).resolve().parents[3]
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    from app.services.core_llm_agent.parsers.nominatim_client import NominatimClient
 
 logger = logging.getLogger(__name__)
 

@@ -177,3 +177,89 @@ textarea:focus-visible {
   border-color: rgba(59, 130, 246, 0.5);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
+
+/* Chat message animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+
+/* Pointer Arrow Styles */
+.pointer-bottom {
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 12px solid #3b82f6;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pointer-top {
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 12px solid #3b82f6;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pointer-left {
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-right: 12px solid #3b82f6;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pointer-right {
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-left: 12px solid #3b82f6;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Pointer Animation */
+@keyframes pointer-pulse {
+  0%, 100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes pointer-pulse-vertical {
+  0%, 100% {
+    transform: translateY(-50%) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-50%) scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+.animate-pointer-pulse {
+  animation: pointer-pulse 2s infinite;
+}
+
+.pointer-left.animate-pointer-pulse,
+.pointer-right.animate-pointer-pulse {
+  animation: pointer-pulse-vertical 2s infinite;
+}

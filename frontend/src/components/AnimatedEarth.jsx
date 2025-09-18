@@ -3,11 +3,36 @@
 import { useEffect, useRef, memo } from 'react'
 import * as THREE from 'three'
 
-const AnimatedEarth = memo(() => {
+const AnimatedEarth = memo(({ rotationSpeed = 0.002 }) => {
   const mountRef = useRef(null)
   const sceneRef = useRef(null)
   const rendererRef = useRef(null)
   const animationIdRef = useRef(null)
+  const rotationRef = useRef(rotationSpeed)
+
+  useEffect(() => {
+    rotationRef.current = rotationSpeed
+  }, [rotationSpeed])
+
+  // Function to create round star texture
+  const createStarTexture = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')
+    
+    // Create gradient for round star
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)')
+    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)')
+    gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)')
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)')
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 32, 32)
+    
+    return canvas
+  }
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -23,7 +48,7 @@ const AnimatedEarth = memo(() => {
       0.1,
       1000
     )
-    camera.position.z = 2
+    camera.position.set(0, 0, 2) // Center the camera
 
     // Renderer setup
     const renderer = new THREE.WebGLRenderer({ 
@@ -32,46 +57,74 @@ const AnimatedEarth = memo(() => {
     })
     renderer.setSize(window.innerWidth, window.innerHeight)
     renderer.setClearColor(0x000000, 0)
+    // Correct color management and tone mapping for accurate brightness
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.NoToneMapping
+    renderer.toneMappingExposure = 1
     rendererRef.current = renderer
 
     // Earth geometry
-    const geometry = new THREE.SphereGeometry(1, 64, 64)
+    const geometry = new THREE.SphereGeometry(0.98, 64,64)
     
-    // Earth material with natural blue appearance
+    // Earth material with only daymap texture
     const textureLoader = new THREE.TextureLoader()
     
-    // Use a cleaner Earth texture without clouds
+    // Use only the earth daymap texture
     const earthTexture = textureLoader.load('/textures/2k_earth_daymap.jpg')
-    const bumpMap = textureLoader.load('/textures/2k_earth_normal_map.tif')
-    const specularMap = textureLoader.load('/textures/2k_earth_specular_map.tif')
+    earthTexture.colorSpace = THREE.SRGBColorSpace
     
-    // Create a natural Earth material matching the image
-    const earthMaterial = new THREE.MeshPhongMaterial({
+    // Use a physically-based material responsive to light, with minimal glare
+    const earthMaterial = new THREE.MeshStandardMaterial({
       map: earthTexture,
-      bumpMap: bumpMap,
-      bumpScale: 0.03, // Slightly more surface detail for realistic continents
-      specularMap: specularMap,
-      specular: new THREE.Color(0x4a90e2), // Natural blue specular for oceans
-      shininess: 20, // Moderate shininess for realistic water reflection
-      color: new THREE.Color(0xffffff) // Natural colors from texture
+      roughness: 0.95,
+      metalness: 0
     })
     
     const earth = new THREE.Mesh(geometry, earthMaterial)
+    earth.position.set(0, 0, 0) // Ensure Earth is at center
     scene.add(earth)
     
-    // Natural lighting setup matching the image
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4) // Natural white ambient
+    // Natural lighting setup for centered Earth
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6) // Subtle ambient
     scene.add(ambientLight)
     
-    // Main directional light from top-left (like in the image)
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2)
-    directionalLight.position.set(3, 2, 3) // Top-left lighting position
+    // Main directional light from top-left
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
+    directionalLight.position.set(2, 2, 2) // Adjusted for centered Earth
     scene.add(directionalLight)
     
     // Subtle fill light from opposite side
-    const fillLight = new THREE.DirectionalLight(0x4a90e2, 0.3)
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.15)
     fillLight.position.set(-2, 1, -2)
     scene.add(fillLight)
+    
+    // Add stars to the scene
+    const starsGeometry = new THREE.BufferGeometry()
+    const starsCount = 4000
+    const positions = new Float32Array(starsCount * 3)
+    
+    for (let i = 0; i < starsCount * 3; i += 3) {
+      positions[i] = (Math.random() - 0.5) * 20
+      positions[i + 1] = (Math.random() - 0.5) * 20
+      positions[i + 2] = (Math.random() - 0.5) * 20
+    }
+    
+    starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    
+    // Create round stars using a custom texture
+    const starTexture = new THREE.CanvasTexture(createStarTexture())
+    
+    const starsMaterial = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.05,
+      transparent: true,
+      opacity: 0.9,
+      map: starTexture,
+      blending: THREE.AdditiveBlending
+    })
+    
+    const stars = new THREE.Points(starsGeometry, starsMaterial)
+    scene.add(stars)
     
     // Add to DOM
     mountRef.current.appendChild(renderer.domElement)
@@ -80,7 +133,9 @@ const AnimatedEarth = memo(() => {
     const animate = () => {
       animationIdRef.current = requestAnimationFrame(animate)
       
-      earth.rotation.y += 0.002
+      const speed = rotationRef.current
+      earth.rotation.y += speed
+      stars.rotation.y += speed * 0.5
       
       renderer.render(scene, camera)
     }
