@@ -44,12 +44,45 @@ export async function exportEmbeddings(sessionId, { format = 'jsonl', includeVec
 }
 
 export async function retrieve(sessionId, query, k = 5, returnVectors = false) {
+  // Backward-compat: route to detailed endpoint now
   const body = { session_id: sessionId, query, k, returnVectors };
-  const res = await fetch(`${API_BASE}/retrieve`, {
+  const res = await fetch(`${API_BASE}/retrieve/detailed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function retrieveSimple(query) {
+  const res = await fetch(`${API_BASE}/retrieve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function retrieveDetailed(sessionId, query, k = 5, returnVectors = false) {
+  const res = await fetch(`${API_BASE}/retrieve/detailed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, query, k, returnVectors }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getLastSimple() {
+  const res = await fetch(`${API_BASE}/retrieve/last`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getLastDetailed(sessionId) {
+  const res = await fetch(`${API_BASE}/retrieve/last/${sessionId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

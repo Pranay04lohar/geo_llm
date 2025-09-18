@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { uploadFiles as ragUploadFiles, getSessionStats as ragGetSessionStats } from '@/utils/api'
+import { uploadFiles as ragUploadFiles, getSessionStats as ragGetSessionStats, retrieveSimple as ragRetrieveSimple, retrieveDetailed as ragRetrieveDetailed, getLastSimple as ragGetLastSimple, getLastDetailed as ragGetLastDetailed } from '@/utils/api'
 import AnimatedEarth from '@/components/AnimatedEarth'
 import CollapsibleSidebar from '@/components/CollapsibleSidebar'
 import MapView from '@/components/MapView'
@@ -470,15 +470,33 @@ export default function Home() {
                           cotTimersRef.current.push(id)
                         })
                         
-                        // simulate backend delay ~5s
-                        await new Promise((res) => setTimeout(res, 5000))
-                        
-                        // Replace CoT message with final response
-                        setMessages(prev => prev.map(msg => 
-                          msg.id === cotMessageId 
-                            ? { type: 'assistant', content: FINAL_TEXT }
-                            : msg
-                        ))
+                        // Call retrieval API
+                        try {
+                          let responseText = ''
+                          let fullJson = null
+                          if (ragSessionId) {
+                            fullJson = await ragRetrieveDetailed(ragSessionId, userPrompt, 5, false)
+                            responseText = (fullJson?.results?.[0]?.content) || 'No results found.'
+                          } else {
+                            fullJson = await ragRetrieveSimple(userPrompt)
+                            responseText = (fullJson?.retrieved_chunks?.[0]?.content) || 'No results found.'
+                          }
+                          // Log full JSON for debugging/inspection
+                          console.log('RAG retrieval result:', fullJson)
+                          // Replace CoT placeholder with the best chunk content
+                          setMessages(prev => prev.map(msg => 
+                            msg.id === cotMessageId 
+                              ? { type: 'assistant', content: responseText }
+                              : msg
+                          ))
+                        } catch (e) {
+                          console.error('RAG retrieval failed:', e)
+                          setMessages(prev => prev.map(msg => 
+                            msg.id === cotMessageId 
+                              ? { type: 'assistant', content: 'Retrieval failed. Please try again.' }
+                              : msg
+                          ))
+                        }
                         
                         setIsProcessing(false)
                         setEarthSpeed(0.002)

@@ -13,7 +13,7 @@ How:  Embeds the query (GPU-accelerated), searches the FAISS index for the
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -26,6 +26,23 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter()
+
+
+class SimpleRetrieveRequest(BaseModel):
+    """Minimal request model per spec."""
+    query: str = Field(..., min_length=1, max_length=1000, description="Query string to search for")
+
+
+class SimpleChunkResult(BaseModel):
+    """Minimal chunk result per spec."""
+    content: str
+    score: float
+
+
+class SimpleRetrieveResponse(BaseModel):
+    """Minimal response model per spec."""
+    query: str
+    retrieved_chunks: List[SimpleChunkResult]
 
 
 class RetrieveRequest(BaseModel):
@@ -69,6 +86,44 @@ def get_rag_store(request: Request) -> RAGStore:
 
 @router.post(
     "/retrieve",
+    response_model=SimpleRetrieveResponse,
+    summary="Retrieve top-5 similar chunks (simple)",
+    description="Minimal retrieval endpoint returning content and score for top-5 matches."
+)
+async def retrieve_simple(
+    request: Request,
+    body: SimpleRetrieveRequest,
+    rag_store: RAGStore = Depends(get_rag_store)
+):
+    """Simple retrieval that matches the requested JSON schema.
+
+    Uses the only active session if exactly one exists; otherwise returns empty results.
+    """
+    try:
+        active_sessions = list(rag_store.sessions.keys())
+        if len(active_sessions) != 1:
+            logger.warning("Simple /retrieve called without unambiguous session; returning empty results")
+            response_obj = SimpleRetrieveResponse(query=body.query, retrieved_chunks=[])
+            # Store latest simple retrieval result globally
+            setattr(request.app.state, "last_retrieval_simple_latest", response_obj.dict())
+            return response_obj
+
+        session_id = active_sessions[0]
+        docs = await rag_store.retrieve_similar_docs(session_id=session_id, query=body.query, k=5)
+        chunks = [SimpleChunkResult(content=d["content"], score=float(d["similarity_score"])) for d in docs]
+        response_obj = SimpleRetrieveResponse(query=body.query, retrieved_chunks=chunks)
+        # Store latest simple retrieval result globally
+        setattr(request.app.state, "last_retrieval_simple_latest", response_obj.dict())
+        return response_obj
+    except Exception as e:
+        logger.error(f"Unexpected error in retrieve_simple: {str(e)}")
+        response_obj = SimpleRetrieveResponse(query=body.query, retrieved_chunks=[])
+        setattr(request.app.state, "last_retrieval_simple_latest", response_obj.dict())
+        return response_obj
+
+
+@router.post(
+    "/retrieve/detailed",
     response_model=RetrieveResponse,
     responses={
         400: {"model": RetrieveError, "description": "Bad request - invalid parameters"},
@@ -172,7 +227,7 @@ async def retrieve_documents(
         
         logger.info(f"Retrieved {len(results)} documents in {processing_time:.2f}ms")
         
-        return RetrieveResponse(
+        response_obj = RetrieveResponse(
             session_id=retrieve_request.session_id,
             query=retrieve_request.query,
             k=retrieve_request.k,
@@ -180,6 +235,13 @@ async def retrieve_documents(
             results=results,
             processing_time_ms=processing_time
         )
+        # Store latest detailed retrieval results
+        setattr(request.app.state, "last_retrieval_detailed_latest", response_obj.dict())
+        # Store per-session
+        store: Dict[str, Any] = getattr(request.app.state, "last_retrieval_by_session", {})
+        store[retrieve_request.session_id] = response_obj.dict()
+        setattr(request.app.state, "last_retrieval_by_session", store)
+        return response_obj
         
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -323,3 +385,24 @@ async def batch_retrieve_documents(
             logger.warning(f"Batch query failed: {e.detail}")
     
     return results
+
+
+@router.get(
+    "/retrieve/last",
+    summary="Get latest simple retrieval result",
+    description="Returns the last response produced by POST /retrieve (simple)."
+)
+async def get_last_simple_retrieval(request: Request):
+    latest = getattr(request.app.state, "last_retrieval_simple_latest", None)
+    return latest or {"message": "No simple retrieval has been made yet."}
+
+
+@router.get(
+    "/retrieve/last/{session_id}",
+    summary="Get latest detailed retrieval result for a session",
+    description="Returns the last response produced by POST /retrieve/detailed for the given session."
+)
+async def get_last_detailed_retrieval(session_id: str, request: Request):
+    store = getattr(request.app.state, "last_retrieval_by_session", {}) or {}
+    result = store.get(session_id)
+    return result or {"message": f"No detailed retrieval found for session {session_id}."}

@@ -74,12 +74,22 @@ Open `http://localhost:3000`.
 - GeoJSON uploads retain the original map workflow.
 
 ### Retrieval
-- In the home page input, type a query and submit to see basic results.
-- Or call the API directly:
-```powershell
-$session = "YOUR_SESSION_ID"
-irm -Method Post -Uri http://localhost:8000/api/v1/retrieve -ContentType "application/json" -Body (@{session_id=$session; query="test query"; k=5; returnVectors=$false} | ConvertTo-Json)
-```
+- In the home page input, type a query and submit to see backend retrieval results (top chunk content is displayed, full JSON is logged to the browser console).
+- API options:
+  - Simple (uses the only active session if exactly one exists):
+    ```powershell
+    irm -Method Post -Uri http://localhost:8000/api/v1/retrieve -ContentType "application/json" -Body (@{query="test query"} | ConvertTo-Json)
+    ```
+  - Detailed (explicit session, richer metadata):
+    ```powershell
+    $session = "YOUR_SESSION_ID"
+    irm -Method Post -Uri http://localhost:8000/api/v1/retrieve/detailed -ContentType "application/json" -Body (@{session_id=$session; query="test query"; k=5; returnVectors=$false} | ConvertTo-Json)
+    ```
+  - View the last stored retrieval responses:
+    ```
+    GET /api/v1/retrieve/last
+    GET /api/v1/retrieve/last/{session_id}
+    ```
 
 ### Embeddings (API)
 - List (no vectors):
@@ -104,7 +114,10 @@ iwr "http://localhost:8000/api/v1/session/$session/export?format=jsonl&includeVe
 - Ingestion
   - `POST /api/v1/upload-temp`: upload up to 2 files; returns `session_id`, counts, quota
 - Retrieval
-  - `POST /api/v1/retrieve`: `{ session_id, query, k, returnVectors? }`
+  - `POST /api/v1/retrieve` (simple): `{ query }` → `{ query, retrieved_chunks: [{ content, score }] }`
+  - `POST /api/v1/retrieve/detailed`: `{ session_id, query, k, returnVectors? }` → rich response with metadata
+  - `GET /api/v1/retrieve/last`: last simple retrieval response (in-memory)
+  - `GET /api/v1/retrieve/last/{session_id}`: last detailed retrieval response per session (in-memory)
 - Sessions
   - `GET /api/v1/session/{session_id}`
   - `DELETE /api/v1/session/{session_id}`
@@ -114,7 +127,26 @@ iwr "http://localhost:8000/api/v1/session/$session/export?format=jsonl&includeVe
   - `GET /api/v1/session/{session_id}/embedding/{index_id}?includeVector`
   - `GET /api/v1/session/{session_id}/export?format=json|jsonl&includeVectors`
 
-Example chunk schema:
+Example detailed retrieval response (abridged):
+```json
+{
+  "session_id": "75196e40-...",
+  "query": "What is geospatial analysis?",
+  "k": 5,
+  "results_count": 2,
+  "results": [
+    {
+      "content": "Geospatial analysis refers to ...",
+      "metadata": { "file": "sample.pdf", "page": 3 },
+      "similarity_score": 0.8732,
+      "index_id": 12
+    }
+  ],
+  "processing_time_ms": 42.7
+}
+```
+
+Example embedding chunk schema:
 ```json
 {
   "session_id": "...",
@@ -133,6 +165,7 @@ Example chunk schema:
 - Quotas: defaults (2 files/request, 10 files/day/user)
 - Session TTL: ~1 hour of inactivity
 - Vectors not returned by default in list responses (opt-in via `includeVectors=true`)
+ - “Last result” endpoints are in-memory only (cleared on server restart)
 
 ## 7) Troubleshooting
 - Frontend upload says “Failed to fetch”
