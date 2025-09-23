@@ -19,7 +19,10 @@ import uvicorn
 
 from app.routers import ingest_router, retrieve_router
 from app.routers import embeddings_router
+from app.routers import auth_router
+from auth.routers.user_router import router as user_router
 from app.services.rag_store import RAGStore
+from auth.middleware.firebase_auth_middleware import FirebaseAuthMiddleware
 from app.config import settings
 
 
@@ -59,10 +62,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add Firebase authentication middleware
+app.add_middleware(FirebaseAuthMiddleware)
+
 # Include routers
+app.include_router(user_router, prefix="/api/v1", tags=["users"])
 app.include_router(ingest_router.router, prefix="/api/v1", tags=["ingestion"])
 app.include_router(retrieve_router.router, prefix="/api/v1", tags=["retrieval"])
 app.include_router(embeddings_router.router, prefix="/api/v1", tags=["embeddings"])
+app.include_router(auth_router.router, prefix="/api/v1", tags=["auth"])
 
 
 @app.get("/")

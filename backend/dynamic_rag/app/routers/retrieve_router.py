@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 from app.services.rag_store import RAGStore
+from auth.middleware.firebase_auth_middleware import get_current_user_uid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -93,6 +94,7 @@ def get_rag_store(request: Request) -> RAGStore:
 async def retrieve_simple(
     request: Request,
     body: SimpleRetrieveRequest,
+    user_id: str = Depends(get_current_user_uid),
     rag_store: RAGStore = Depends(get_rag_store)
 ):
     """Simple retrieval that matches the requested JSON schema.
@@ -151,6 +153,7 @@ async def retrieve_simple(
 async def retrieve_documents(
     request: Request,
     retrieve_request: RetrieveRequest,
+    user_id: str = Depends(get_current_user_uid),
     rag_store: RAGStore = Depends(get_rag_store)
 ):
     """

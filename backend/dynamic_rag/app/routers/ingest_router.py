@@ -22,6 +22,7 @@ import uuid
 from app.services.rag_store import RAGStore
 from app.utils.data_ingestion_pipeline import DataIngestionPipeline
 from app.config import FILE_PROCESSING_CONFIG
+from auth.middleware.firebase_auth_middleware import get_current_user_uid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -103,7 +104,7 @@ def validate_file_type(filename: str) -> bool:
 async def upload_files(
     request: Request,
     files: List[UploadFile] = File(..., description="Files to upload (max 2 files)"),
-    user_id: str = "default_user",  # In production, get from authentication
+    user_id: str = Depends(get_current_user_uid),
     rag_store: RAGStore = Depends(get_rag_store)
 ):
     """

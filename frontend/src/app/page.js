@@ -7,8 +7,11 @@ import CollapsibleSidebar from '@/components/CollapsibleSidebar'
 import MapView from '@/components/MapView'
 import MiniMap from '@/components/MiniMap'
 import FullScreenMap from '@/components/FullScreenMap'
+import AuthButton from '@/components/AuthButton'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 
-export default function Home() {
+function HomeContent() {
+  const { token, isAuthenticated } = useAuth();
   const [leftCollapsed, setLeftCollapsed] = useState(true) // Default to collapsed
   const [rightCollapsed, setRightCollapsed] = useState(true) // Deprecated: right panel removed
   const [isHydrated, setIsHydrated] = useState(false)
@@ -176,6 +179,11 @@ export default function Home() {
               </div>
             </div>
             
+            {/* Authentication Section */}
+            <div className="mb-4 px-6">
+              <AuthButton className="w-full" />
+            </div>
+            
             {/* New Chat Button with Gradient */}
             <button 
               id="new-chat-button"
@@ -269,7 +277,7 @@ export default function Home() {
               <div className="flex items-center justify-between relative">
                 {/* Left: Get Plus Button */}
                 <div className="flex-shrink-0 flex items-center gap-3">
-                  <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105">
+                  <button className="bg-gradient-to-r from-emerald-600 to-green-500 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105">
                     Get Plus
                   </button>
                 </div>
@@ -385,15 +393,21 @@ export default function Home() {
                           const lower = files.map(f => f.name.toLowerCase())
                           const isRag = lower.some(n => n.endsWith('.pdf') || n.endsWith('.txt') || n.endsWith('.docx') || n.endsWith('.md'))
                           try {
+                            if (!isAuthenticated) {
+                              const { useAlert } = require('@/components/AlertProvider');
+                              const { showError } = useAlert();
+                              showError('Sign in required', 'Please sign in to upload files.');
+                              return;
+                            }
                             if (isRag) {
                               const selected = files.slice(0, 2)
-                              const res = await ragUploadFiles(selected)
+                              const res = await ragUploadFiles(selected, token)
                               setRagSessionId(res.session_id)
                               setRagMessage(`Processed ${res.files_processed} files · ${res.documents_extracted} chunks`)
                               if (typeof window !== 'undefined') {
                                 localStorage.setItem('rag_session_id', res.session_id)
                               }
-                              try { await ragGetSessionStats(res.session_id) } catch {}
+                              try { await ragGetSessionStats(res.session_id, token) } catch {}
                             } else {
                               const file = files[0]
                               const name = file.name.toLowerCase()
@@ -475,10 +489,10 @@ export default function Home() {
                           let responseText = ''
                           let fullJson = null
                           if (ragSessionId) {
-                            fullJson = await ragRetrieveDetailed(ragSessionId, userPrompt, 5, false)
+                            fullJson = await ragRetrieveDetailed(ragSessionId, userPrompt, 5, false, token)
                             responseText = (fullJson?.results?.[0]?.content) || 'No results found.'
                           } else {
-                            fullJson = await ragRetrieveSimple(userPrompt)
+                            fullJson = await ragRetrieveSimple(userPrompt, token)
                             responseText = (fullJson?.retrieved_chunks?.[0]?.content) || 'No results found.'
                           }
                           // Log full JSON for debugging/inspection
@@ -514,7 +528,7 @@ export default function Home() {
                       RAG session: <span className="font-mono">{ragSessionId}</span>{ragMessage ? ` · ${ragMessage}` : ''}
                     </div>
                   )}
-                  <button className="text-white/60 text-sm flex items-center gap-2 transition-all duration-200 px-4 py-2 rounded-xl hover:scale-105 hover:bg-white/10">
+                    <button className="text-white/60 text-sm flex items-center gap-2 transition-all duration-200 px-4 py-2 rounded-xl hover:scale-105 hover:bg-white/10">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                     </svg>
@@ -575,4 +589,12 @@ export default function Home() {
       </div>
     </div>
   )
+}
+
+export default function Home() {
+  return (
+    <AuthProvider>
+      <HomeContent />
+    </AuthProvider>
+  );
 }

@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file = ".env",
         case_sensitive = False,
-        env_nested_delimiter = '__'
+        env_nested_delimiter = '__',
+        extra = 'ignore'
     )
 
     # Allow comma-separated env var for list parsing
