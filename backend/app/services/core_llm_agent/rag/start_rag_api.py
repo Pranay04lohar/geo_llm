@@ -3,7 +3,7 @@ Startup script for the RAG API service.
 
 This script starts the FastAPI RAG service on a separate port to work
 alongside the dynamic RAG service and provide the /ask endpoint.
-"""
+""" 
 
 import uvicorn
 import logging

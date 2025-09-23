@@ -68,7 +68,7 @@ class CoreLLMAgent:
         
         logger.info("CoreLLMAgent initialized with modular pipeline")
     
-    def process_query(self, query: str) -> Dict[str, Any]:
+    def process_query(self, query: str, rag_session_id: Optional[str] = None) -> Dict[str, Any]:
         """Process a user query through the complete pipeline.
         
         This is the main entry point that replaces the LangGraph workflow
@@ -113,7 +113,9 @@ class CoreLLMAgent:
             # Step 3: Service Dispatch
             service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
             logger.info(f"Step 3: Dispatching to {service_type_str} service...")
-            service_response = self.service_dispatcher.dispatch(query, intent_result, location_result)
+            service_response = self.service_dispatcher.dispatch(
+                query, intent_result, location_result, rag_session_id=rag_session_id
+            )
             
             # Step 4: Result Formatting
             logger.info("Step 4: Formatting final result...")
@@ -136,7 +138,7 @@ class CoreLLMAgent:
             logger.error(f"Error in query processing: {e}")
             return self.result_formatter._error_result(query, str(e), total_processing_time)
     
-    def process_query_legacy(self, query: str) -> Dict[str, Any]:
+    def process_query_legacy(self, query: str, rag_session_id: Optional[str] = None) -> Dict[str, Any]:
         """Process query and return in legacy format for backward compatibility.
         
         This method provides the exact same interface as the original
@@ -148,7 +150,7 @@ class CoreLLMAgent:
         Returns:
             Legacy format result with only analysis and roi fields
         """
-        result = self.process_query(query)
+        result = self.process_query(query, rag_session_id=rag_session_id)
         return self.result_formatter.format_legacy_result(result)
     
     def _empty_query_result(self, processing_time: float) -> Dict[str, Any]:
@@ -187,7 +189,8 @@ class CoreLLMAgent:
             Result dictionary with analysis and roi
         """
         query = state.get("query", "")
-        return self.process_query_legacy(query)
+        rag_session_id = state.get("rag_session_id")
+        return self.process_query_legacy(query, rag_session_id=rag_session_id)
     
     # Individual component access methods for testing and debugging
     

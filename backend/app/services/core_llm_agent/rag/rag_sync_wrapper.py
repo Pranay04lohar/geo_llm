@@ -86,7 +86,8 @@ class SyncRAGService:
         location_result: LocationParseResult,
         k: int = 5,
         temperature: float = 0.7,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Synchronous ask method that wraps the async RAG service.
         
@@ -109,7 +110,8 @@ class SyncRAGService:
                     intent_result=intent_result,
                     location_result=location_result,
                     k=k,
-                    temperature=temperature
+                    temperature=temperature,
+                    session_id=session_id
                 ),
                 timeout=timeout
             )

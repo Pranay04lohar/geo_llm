@@ -75,7 +75,8 @@ class ServiceDispatcher:
         self, 
         query: str, 
         intent_result: IntentResult, 
-        location_result: LocationParseResult
+        location_result: LocationParseResult,
+        rag_session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatch request to appropriate service based on intent.
         
@@ -102,10 +103,20 @@ class ServiceDispatcher:
             else:
                 service_type_value = str(service_type)
             
+            # If a RAG session is explicitly provided, prefer RAG regardless of intent
+            if rag_session_id and self.rag_service_available:
+                logger.info("RAG session detected; routing to RAG service")
+                return self._dispatch_rag(query, intent_result, location_result, rag_session_id)
+            
             if service_type == ServiceType.GEE or service_type_value == "GEE":
                 return self._dispatch_gee(query, intent_result, location_result)
+            # RAG path deprecated: route any RAG-intended queries to Search fallback
             elif service_type == ServiceType.RAG or service_type_value == "RAG":
-                return self._dispatch_rag(query, intent_result, location_result)
+                if rag_session_id and self.rag_service_available:
+                    logger.info("RAG intent with session; routing to RAG service")
+                    return self._dispatch_rag(query, intent_result, location_result, rag_session_id)
+                logger.info("RAG service path deprecated without session; routing to Search service")
+                return self._dispatch_search(query, intent_result, location_result)
             elif service_type == ServiceType.SEARCH or service_type_value == "SEARCH":
                 return self._dispatch_search(query, intent_result, location_result)
             else:
@@ -370,7 +381,8 @@ class ServiceDispatcher:
         self, 
         query: str, 
         intent_result: IntentResult, 
-        location_result: LocationParseResult
+        location_result: LocationParseResult,
+        rag_session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Dispatch to RAG service for document-based question answering.
         
@@ -416,7 +428,8 @@ class ServiceDispatcher:
                 intent_result=intent_result,
                 location_result=location_result,
                 k=5,
-                temperature=0.7
+                temperature=0.7,
+                session_id=rag_session_id
             )
             
             logger.info(f"RAG service response received with confidence: {response.get('confidence', 0.0)}")

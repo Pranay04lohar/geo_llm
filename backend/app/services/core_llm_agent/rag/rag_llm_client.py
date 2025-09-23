@@ -142,12 +142,23 @@ class RAGLLMClient:
                     # Extract response content
                     content = ""
                     tokens_used = None
+                    finish_reason = None
                     
                     if "choices" in data and data["choices"]:
-                        content = data["choices"][0]["message"]["content"]
+                        first_choice = data["choices"][0]
+                        content = first_choice.get("message", {}).get("content", "")
+                        finish_reason = first_choice.get("finish_reason")
                     
                     if "usage" in data:
                         tokens_used = data["usage"].get("total_tokens")
+                    
+                    # Debug log when content is unexpectedly empty
+                    if not content or not content.strip():
+                        snippet = json.dumps(data)[:500]
+                        logger.warning(
+                            f"LLM returned empty content. finish_reason={finish_reason} "
+                            f"model={self.model_name} usage_tokens={tokens_used} raw_snippet={snippet}"
+                        )
                     
                     return LLMResponse(
                         content=content,
@@ -223,7 +234,7 @@ class RAGLLMClient:
         """
         # Try primary model first
         response = await self.generate_response(prompt_parts, **kwargs)
-        if response.success:
+        if response.success and response.content and response.content.strip():
             return response
         
         # Try fallback models
@@ -243,7 +254,7 @@ class RAGLLMClient:
             self.model_name = fallback_model
             
             response = await self.generate_response(prompt_parts, **kwargs)
-            if response.success:
+            if response.success and response.content and response.content.strip():
                 logger.info(f"Successful response from fallback model: {fallback_model}")
                 # Restore original model for future calls
                 self.model_name = original_model
@@ -252,7 +263,10 @@ class RAGLLMClient:
         # Restore original model
         self.model_name = original_model
         
-        # If all models failed, return the last error
+        # If all models failed or produced empty content, mark as failure
+        if response.success and (not response.content or not response.content.strip()):
+            response.success = False
+            response.error = (response.error or "empty_content")
         return response
     
     def extract_sources(self, response_content: str) -> List[Dict[str, Any]]:
