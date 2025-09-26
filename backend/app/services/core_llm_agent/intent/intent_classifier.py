@@ -204,7 +204,5 @@ class IntentClassifier:
         # Convert to legacy format
         if result.service_type == ServiceType.GEE:
             return "GEE_Tool"
-        elif result.service_type == ServiceType.RAG:
-            return "RAG_Tool"
         else:
             return "WebSearch_Tool"

@@ -164,7 +164,7 @@ class LocationNER:
 
         try:
             start_time = time.time()
-            resp = requests.post(self.base_url, headers=headers, data=json.dumps(payload), timeout=20)
+            resp = requests.post(self.base_url, headers=headers, data=json.dumps(payload), timeout=10)
             resp.raise_for_status()
             processing_time = time.time() - start_time
             
@@ -238,14 +238,140 @@ class LocationNER:
             
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP error in location extraction: {e}")
-            return []
+            # Fallback to simple regex extraction for common Indian cities
+            return self._fallback_location_extraction(query)
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error in location extraction: {e}")
             logger.error(f"Raw content that failed to parse: '{content[:200]}...' (truncated)")
-            return []
+            # Fallback to simple regex extraction for common Indian cities
+            return self._fallback_location_extraction(query)
         except Exception as e:
             logger.error(f"Unexpected error in location extraction: {e}")
-            return []
+            # Fallback to simple regex extraction for common Indian cities
+            return self._fallback_location_extraction(query)
+    
+    def _fallback_location_extraction(self, query: str) -> List[LocationEntity]:
+        """Fallback location extraction using regex patterns for common Indian cities.
+        
+        Args:
+            query: User query string
+            
+        Returns:
+            List of LocationEntity objects found via regex
+        """
+        import re
+        
+        # Common Indian cities and states (case-insensitive)
+        indian_locations = {
+            # Major cities
+            'mumbai': ('Mumbai', 'city', 95),
+            'delhi': ('Delhi', 'city', 95),
+            'bangalore': ('Bangalore', 'city', 95),
+            'bengaluru': ('Bengaluru', 'city', 95),
+            'chennai': ('Chennai', 'city', 95),
+            'kolkata': ('Kolkata', 'city', 95),
+            'hyderabad': ('Hyderabad', 'city', 95),
+            'pune': ('Pune', 'city', 95),
+            'ahmedabad': ('Ahmedabad', 'city', 95),
+            'jaipur': ('Jaipur', 'city', 95),
+            'surat': ('Surat', 'city', 95),
+            'lucknow': ('Lucknow', 'city', 95),
+            'kanpur': ('Kanpur', 'city', 95),
+            'nagpur': ('Nagpur', 'city', 95),
+            'indore': ('Indore', 'city', 95),
+            'thane': ('Thane', 'city', 95),
+            'bhopal': ('Bhopal', 'city', 95),
+            'visakhapatnam': ('Visakhapatnam', 'city', 95),
+            'pimpri': ('Pimpri-Chinchwad', 'city', 95),
+            'patna': ('Patna', 'city', 95),
+            'vadodara': ('Vadodara', 'city', 95),
+            'ghaziabad': ('Ghaziabad', 'city', 95),
+            'ludhiana': ('Ludhiana', 'city', 95),
+            'agra': ('Agra', 'city', 95),
+            'nashik': ('Nashik', 'city', 95),
+            'faridabad': ('Faridabad', 'city', 95),
+            'meerut': ('Meerut', 'city', 95),
+            'rajkot': ('Rajkot', 'city', 95),
+            'kalyan': ('Kalyan-Dombivli', 'city', 95),
+            'vasai': ('Vasai-Virar', 'city', 95),
+            'varanasi': ('Varanasi', 'city', 95),
+            'srinagar': ('Srinagar', 'city', 95),
+            'aurangabad': ('Aurangabad', 'city', 95),
+            'dhanbad': ('Dhanbad', 'city', 95),
+            'amritsar': ('Amritsar', 'city', 95),
+            'navi mumbai': ('Navi Mumbai', 'city', 95),
+            'allahabad': ('Allahabad', 'city', 95),
+            'prayagraj': ('Prayagraj', 'city', 95),
+            'howrah': ('Howrah', 'city', 95),
+            'ranchi': ('Ranchi', 'city', 95),
+            'gwalior': ('Gwalior', 'city', 95),
+            'jabalpur': ('Jabalpur', 'city', 95),
+            'coimbatore': ('Coimbatore', 'city', 95),
+            'vijayawada': ('Vijayawada', 'city', 95),
+            'jodhpur': ('Jodhpur', 'city', 95),
+            'madurai': ('Madurai', 'city', 95),
+            'raipur': ('Raipur', 'city', 95),
+            'kota': ('Kota', 'city', 95),
+            'chandigarh': ('Chandigarh', 'city', 95),
+            'guwahati': ('Guwahati', 'city', 95),
+            
+            # States
+            'maharashtra': ('Maharashtra', 'state', 95),
+            'karnataka': ('Karnataka', 'state', 95),
+            'tamil nadu': ('Tamil Nadu', 'state', 95),
+            'gujarat': ('Gujarat', 'state', 95),
+            'rajasthan': ('Rajasthan', 'state', 95),
+            'uttar pradesh': ('Uttar Pradesh', 'state', 95),
+            'west bengal': ('West Bengal', 'state', 95),
+            'madhya pradesh': ('Madhya Pradesh', 'state', 95),
+            'bihar': ('Bihar', 'state', 95),
+            'odisha': ('Odisha', 'state', 95),
+            'telangana': ('Telangana', 'state', 95),
+            'andhra pradesh': ('Andhra Pradesh', 'state', 95),
+            'kerala': ('Kerala', 'state', 95),
+            'punjab': ('Punjab', 'state', 95),
+            'haryana': ('Haryana', 'state', 95),
+            'jharkhand': ('Jharkhand', 'state', 95),
+            'assam': ('Assam', 'state', 95),
+            'himachal pradesh': ('Himachal Pradesh', 'state', 95),
+            'chhattisgarh': ('Chhattisgarh', 'state', 95),
+            'uttarakhand': ('Uttarakhand', 'state', 95),
+            'goa': ('Goa', 'state', 95),
+            'tripura': ('Tripura', 'state', 95),
+            'manipur': ('Manipur', 'state', 95),
+            'meghalaya': ('Meghalaya', 'state', 95),
+            'nagaland': ('Nagaland', 'state', 95),
+            'mizoram': ('Mizoram', 'state', 95),
+            'arunachal pradesh': ('Arunachal Pradesh', 'state', 95),
+            'sikkim': ('Sikkim', 'state', 95),
+        }
+        
+        entities = []
+        query_lower = query.lower()
+        
+        # Find matches (prioritize longer matches first)
+        for location_key in sorted(indian_locations.keys(), key=len, reverse=True):
+            if location_key in query_lower:
+                # Avoid partial matches by checking word boundaries
+                pattern = r'\b' + re.escape(location_key) + r'\b'
+                if re.search(pattern, query_lower):
+                    proper_name, loc_type, confidence = indian_locations[location_key]
+                    
+                    # Check if we already found this location (avoid duplicates)
+                    if not any(e.matched_name.lower() == proper_name.lower() for e in entities):
+                        entity = LocationEntity(
+                            matched_name=proper_name,
+                            type=loc_type,
+                            confidence=float(confidence)
+                        )
+                        entities.append(entity)
+        
+        if entities:
+            logger.info(f"Fallback extraction found {len(entities)} locations: {[e.matched_name for e in entities]}")
+        else:
+            logger.warning("Fallback extraction found no locations")
+            
+        return entities
     
     def extract_locations_dict(self, query: str) -> List[Dict[str, Any]]:
         """Extract locations and return as dict format for backward compatibility.

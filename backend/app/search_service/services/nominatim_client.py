@@ -825,12 +825,18 @@ class NominatimClient:
             # Calculate original area for comparison
             original_area = self._calculate_area_from_geometry(geojson)
             
-            # Determine tolerance based on geometry size
-            if original_area and original_area > 10000:  # Large area (state/country level)
-                tolerance = 0.001  # ~100m tolerance
-            elif original_area and original_area > 1000:  # Medium area (district level)
+            # Determine tolerance based on geometry size - more aggressive for states
+            if original_area and original_area > 200000:  # Very large states (>200k km²)
+                tolerance = 0.005   # ~500m tolerance - aggressive but preserves shape
+            elif original_area and original_area > 100000:  # Large states (100-200k km²)
+                tolerance = 0.003   # ~300m tolerance  
+            elif original_area and original_area > 50000:   # Medium states (50-100k km²)
+                tolerance = 0.002   # ~200m tolerance
+            elif original_area and original_area > 10000:   # Large regions (10-50k km²)
+                tolerance = 0.001   # ~100m tolerance
+            elif original_area and original_area > 1000:    # Districts (1-10k km²)
                 tolerance = 0.0005  # ~50m tolerance
-            else:  # Small area (city level)
+            else:  # Cities (<1k km²)
                 tolerance = 0.0001  # ~10m tolerance
             
             # Simplify geometry
@@ -846,15 +852,24 @@ class NominatimClient:
                 "coordinates": self._geom_to_coordinates(simplified_geom)
             }
             
-            # Validate simplification - check area preservation
+            # Validate simplification - check area preservation with dynamic thresholds
             simplified_area = self._calculate_area_from_geometry(simplified_geojson)
             if original_area and simplified_area:
                 area_error = abs(original_area - simplified_area) / original_area
-                if area_error > 0.02:  # More than 2% error
-                    logger.warning(f"Simplification error too high: {area_error:.2%}, returning original")
+                
+                # Allow higher error tolerance for larger areas
+                if original_area > 100000:      # Large states
+                    max_error = 0.05            # 5% error allowed
+                elif original_area > 10000:     # Medium regions
+                    max_error = 0.03            # 3% error allowed  
+                else:                           # Cities/small areas
+                    max_error = 0.02            # 2% error allowed
+                
+                if area_error > max_error:
+                    logger.warning(f"Simplification error too high: {area_error:.2%} (max: {max_error:.1%}), returning original")
                     return geojson
                 else:
-                    logger.info(f"Simplification successful: {area_error:.2%} area error")
+                    logger.info(f"Simplification successful: {area_error:.2%} area error (tolerance: {tolerance:.4f})")
             
             return simplified_geojson
             

@@ -103,20 +103,14 @@ class ServiceDispatcher:
             else:
                 service_type_value = str(service_type)
             
-            # If a RAG session is explicitly provided, prefer RAG regardless of intent
+            # Check for RAG session first (dynamic RAG usage when files uploaded)
             if rag_session_id and self.rag_service_available:
                 logger.info("RAG session detected; routing to RAG service")
                 return self._dispatch_rag(query, intent_result, location_result, rag_session_id)
             
+            # Route based on intent classification
             if service_type == ServiceType.GEE or service_type_value == "GEE":
                 return self._dispatch_gee(query, intent_result, location_result)
-            # RAG path deprecated: route any RAG-intended queries to Search fallback
-            elif service_type == ServiceType.RAG or service_type_value == "RAG":
-                if rag_session_id and self.rag_service_available:
-                    logger.info("RAG intent with session; routing to RAG service")
-                    return self._dispatch_rag(query, intent_result, location_result, rag_session_id)
-                logger.info("RAG service path deprecated without session; routing to Search service")
-                return self._dispatch_search(query, intent_result, location_result)
             elif service_type == ServiceType.SEARCH or service_type_value == "SEARCH":
                 return self._dispatch_search(query, intent_result, location_result)
             else:
@@ -349,7 +343,20 @@ class ServiceDispatcher:
                     "includeMedianVis": False
                 }
             
-            response = requests.post(url, json=payload, timeout=120)
+            # Calculate timeout based on area size
+            area_km2 = roi_info.get("area_km2", 0)
+            timeout = self._calculate_timeout_for_area(area_km2, analysis_type)
+            
+            # Check if area is too large for analysis
+            if area_km2 > 20000:  # Areas larger than 20k km² are rejected
+                logger.warning(f"🚫 AREA TOO LARGE: {area_km2:.0f} km² exceeds 20,000 km² limit")
+                return self._create_area_too_large_response(area_km2, analysis_type, roi_info)
+            
+            # Log warnings for large area analysis
+            self._log_area_warnings(area_km2, analysis_type, timeout)
+            
+            # Standard single-request processing
+            response = requests.post(url, json=payload, timeout=timeout)
             response.raise_for_status()
             result = response.json()
             
@@ -376,6 +383,124 @@ class ServiceDispatcher:
                 "tile_url": None
             }
             return error_response
+    
+    def _calculate_timeout_for_area(self, area_km2: float, analysis_type: str) -> int:
+        """Calculate appropriate timeout based on area size and analysis type.
+        
+        Args:
+            area_km2: Area in square kilometers
+            analysis_type: Type of analysis (water, ndvi, lulc, lst)
+            
+        Returns:
+            Timeout in seconds
+        """
+        # Base timeouts by analysis type (water is generally fastest)
+        base_timeouts = {
+            "water": 120,    # Water analysis is typically faster
+            "ndvi": 120,     # NDVI with time series takes longer
+            "lulc": 150,    # LULC classification is complex
+            "lst": 150      # LST with UHI calculation is most complex
+        }
+        
+        base_timeout = base_timeouts.get(analysis_type, 90)
+        
+        # Scale timeout based on area (simplified since max is 20k km²)
+        if area_km2 > 10000:       # Large regions (10-20k km²)
+            multiplier = 2.0       # 2x timeout (e.g., 240s for water)
+        elif area_km2 > 1000:      # Districts (1-10k km²)
+            multiplier = 1.5       # 1.5x timeout (e.g., 180s for water)
+        else:                      # Cities (<1k km²)
+            multiplier = 1.0       # Base timeout
+        
+        timeout = int(base_timeout * multiplier)
+        
+        # Cap at reasonable maximum (20 minutes)
+        return min(timeout, 1200)
+    
+    def _log_area_warnings(self, area_km2: float, analysis_type: str, timeout: int) -> None:
+        """Log appropriate warnings and information for area analysis.
+        
+        Args:
+            area_km2: Area in square kilometers
+            analysis_type: Type of analysis
+            timeout: Calculated timeout
+        """
+        # Since we now have a 20k km² limit, simplify the warnings
+        if area_km2 > 10000:  # Large regions (10-20k km²)
+            logger.info(f"📍 LARGE REGIONAL ANALYSIS: {area_km2:.0f} km² {analysis_type.upper()} analysis")
+            logger.info(f"⏱️  Expected processing time: {timeout} seconds")
+        elif area_km2 > 1000:  # Medium regions (1-10k km²)
+            logger.info(f"📊 REGIONAL ANALYSIS: {area_km2:.0f} km² {analysis_type.upper()} analysis")
+            logger.info(f"⏱️  Using {timeout}s timeout")
+        else:  # Cities and smaller (<1k km²)
+            logger.info(f"🏙️  CITY ANALYSIS: {area_km2:.0f} km² {analysis_type.upper()} analysis")
+            logger.info(f"⏱️  Using standard {timeout}s timeout")
+    
+    def _create_area_too_large_response(
+        self, 
+        area_km2: float, 
+        analysis_type: str, 
+        roi_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Create response for areas that are too large to analyze.
+        
+        Args:
+            area_km2: Area in square kilometers
+            analysis_type: Type of analysis requested
+            roi_info: ROI information
+            
+        Returns:
+            Error response with helpful suggestions
+        """
+        location_name = roi_info.get("display_name", "the selected area")
+        
+        # Create user-friendly error message with suggestions
+        error_message = (
+            f"🚫 **Area Too Large for Analysis**\n\n"
+            f"The requested area ({location_name}) covers {area_km2:,.0f} km², "
+            f"which exceeds our 20,000 km² processing limit.\n\n"
+            f"**Why this limit exists:**\n"
+            f"• Large areas require 15-30+ minutes to process\n"
+            f"• High computational cost and resource usage\n"
+            f"• Risk of timeouts and incomplete results\n\n"
+            f"**🎯 Suggested alternatives:**\n"
+            f"• Try a specific **city** or **district** instead\n"
+            f"• Choose a **smaller region** within the area\n"
+            f"• Focus on a **particular zone** of interest\n\n"
+            f"**Examples of good alternatives:**\n"
+            f"• Instead of 'Madhya Pradesh' → try 'Bhopal' or 'Indore'\n"
+            f"• Instead of 'Rajasthan' → try 'Jaipur' or 'Jodhpur'\n"
+            f"• Instead of 'Uttar Pradesh' → try 'Lucknow' or 'Kanpur'"
+        )
+        
+        return {
+            "success": False,
+            "analysis": error_message,
+            "roi": roi_info,
+            "summary": f"Analysis not performed: {location_name} ({area_km2:,.0f} km²) exceeds size limit",
+            "evidence": [f"area_too_large:{area_km2:.0f}km2"],
+            "metadata": {
+                "processing_time": 0.1,
+                "service_used": "size_validator",
+                "area_km2": area_km2,
+                "limit_km2": 20000,
+                "analysis_type": analysis_type
+            },
+            "sources": [],
+            "confidence": 1.0,
+            "analysis_data": {
+                "analysis_type": analysis_type,
+                "error": f"Area too large: {area_km2:,.0f} km² > 20,000 km² limit",
+                "tile_url": None,
+                "area_km2": area_km2,
+                "limit_exceeded": True
+            },
+            "debug": {
+                "area_check": f"REJECTED: {area_km2:.0f} km² > 20,000 km² limit",
+                "location": location_name,
+                "suggested_action": "Try a smaller, more specific location"
+            }
+        }
     
     def _dispatch_rag(
         self, 

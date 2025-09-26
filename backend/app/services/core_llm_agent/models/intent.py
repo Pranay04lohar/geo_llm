@@ -13,7 +13,6 @@ from enum import Enum
 class ServiceType(str, Enum):
     """Available service types for routing."""
     GEE = "GEE"
-    RAG = "RAG" 
     SEARCH = "SEARCH"
 
 

@@ -9,9 +9,10 @@ import {
   getLastSimple as ragGetLastSimple,
   getLastDetailed as ragGetLastDetailed,
 } from "@/utils/api";
-// Simple RAG functions - no need for separate files
+// Simple API functions - no need for separate files
 const RAG_API_BASE = "http://localhost:8002";
 const DYNAMIC_RAG_BASE = "http://localhost:8000";
+const CORE_AGENT_API_BASE = "http://localhost:8003";
 
 async function uploadDocsAndGetSession(files) {
   const formData = new FormData();
@@ -51,11 +52,29 @@ async function askRag(query, sessionId) {
 
   return await response.json();
 }
+
+async function askCoreAgent(query, ragSessionId = null) {
+  const response = await fetch(`${CORE_AGENT_API_BASE}/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query,
+      rag_session_id: ragSessionId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Core Agent query failed: ${response.status}`);
+  }
+
+  return await response.json();
+}
 import AnimatedEarth from "@/components/AnimatedEarth";
 import CollapsibleSidebar from "@/components/CollapsibleSidebar";
 import MapView from "@/components/MapView";
 import MiniMap from "@/components/MiniMap";
 import FullScreenMap from "@/components/FullScreenMap";
+import AnalysisResult from "@/components/AnalysisResult";
 
 export default function Home() {
   const [leftCollapsed, setLeftCollapsed] = useState(true); // Default to collapsed
@@ -570,6 +589,8 @@ export default function Home() {
                               {message.content}
                             </div>
                           </div>
+                        ) : message.type === "assistant" ? (
+                          <AnalysisResult content={message.content} />
                         ) : (
                           <div className="whitespace-pre-wrap">
                             {message.content}
@@ -797,21 +818,34 @@ export default function Home() {
                                 ragResponse?.answer || "No answer received";
                               console.log("RAG response:", ragResponse);
                             } else {
-                              // Guide users to upload documents for RAG functionality
-                              responseText = `📚 **Document Upload Required**
+                              // Use Core Agent for GEE/Search queries
+                              const coreResponse = await askCoreAgent(
+                                userPrompt
+                              );
+                              responseText =
+                                coreResponse?.analysis ||
+                                "No analysis received";
+                              console.log("Core Agent response:", coreResponse);
 
-To get AI-powered answers about your documents, please:
+                              // Extract map visualization data if available
+                              let mapData = null;
+                              if (coreResponse?.analysis_data?.tile_url) {
+                                mapData = {
+                                  tile_url: coreResponse.analysis_data.tile_url,
+                                  analysis_type:
+                                    coreResponse.analysis_data.analysis_type,
+                                  roi: coreResponse.roi,
+                                  service_used: coreResponse.service_used,
+                                };
+                                console.log("Map data extracted:", mapData);
+                              }
 
-1. **Upload documents** using the 📎 upload button
-2. **Supported formats**: PDF, TXT, DOCX, MD files
-3. **Ask questions** about the uploaded content
-
-For **geospatial analysis** without documents:
-• Upload GeoJSON files for boundary analysis
-• Ask about NDVI, LULC, LST, or water analysis
-• Mention specific locations for satellite data
-
-*Currently no documents are uploaded. Upload documents to unlock RAG capabilities.*`;
+                              // Store map data in the message for later use
+                              if (mapData) {
+                                responseText += `\n\n[MAP_DATA:${JSON.stringify(
+                                  mapData
+                                )}]`;
+                              }
                             }
 
                             // Replace CoT placeholder with response

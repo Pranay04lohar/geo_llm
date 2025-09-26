@@ -298,7 +298,7 @@ def test_sync_rag_service():
             from app.services.core_llm_agent.models.location import LocationParseResult
             
             intent_result = IntentResult(
-                service_type=ServiceType.RAG,
+                service_type=ServiceType.SEARCH,
                 confidence=0.9,
                 analysis_type="policy",
                 reasoning="Policy-related query detected"
