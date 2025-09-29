@@ -106,6 +106,55 @@ class LSTRequest(GEERequest):
     includeTimeSeries: bool = False
     exactComputation: bool = False
 
+class LSTSampleRequest(BaseModel):
+    """Request model to sample LST at a coordinate."""
+    lng: float
+    lat: float
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 1000
+
+class LSTGridRequest(BaseModel):
+    """Request model to generate LST vector grid over ROI."""
+    roi: Dict[str, Any]  # GeoJSON geometry
+    cellSizeKm: float = 1.0  # Grid cell size in km
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 1000
+
+class LSTBatchSampleRequest(BaseModel):
+    """Request model to sample LST at multiple points."""
+    points: List[Dict[str, float]]  # List of {lng, lat} dicts
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 1000
+
+class NDVISampleRequest(BaseModel):
+    """Request model to sample NDVI at a coordinate."""
+    lng: float
+    lat: float
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 30
+    cloudThreshold: float = 20
+
+class NDVIGridRequest(BaseModel):
+    """Request model to generate NDVI vector grid over ROI."""
+    roi: Dict[str, Any]  # GeoJSON geometry
+    cellSizeKm: float = 1.0  # Grid cell size in km
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 30
+    cloudThreshold: float = 20
+
+class NDVIBatchSampleRequest(BaseModel):
+    """Request model to sample NDVI at multiple points."""
+    points: List[Dict[str, float]]  # List of {lng, lat} dicts
+    startDate: str = "2023-06-01"
+    endDate: str = "2023-08-31"
+    scale: int = 30
+    cloudThreshold: float = 20
+
 class WaterRequest(BaseModel):
     """Water analysis request parameters"""
     roi: Dict[str, Any]  # Region of interest (Polygon or Point)
@@ -399,6 +448,163 @@ async def analyze_ndvi_vegetation(request: NDVIRequest):
             status_code=500,
             detail=f"Internal server error: {type(e).__name__}: {str(e)}"
         )
+
+@app.post("/ndvi/sample")
+async def sample_ndvi_value(request: NDVISampleRequest):
+    """Sample median NDVI at a given coordinate (lng, lat)."""
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.ndvi_service import NDVIService
+        result = NDVIService.sample_ndvi_at_point(
+            lng=request.lng,
+            lat=request.lat,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale,
+            cloud_threshold=request.cloudThreshold
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=404, detail=result.get("error", "Sampling failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in NDVI sample endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/ndvi/grid")
+async def generate_ndvi_grid(request: NDVIGridRequest):
+    """Generate a vector grid over ROI with NDVI statistics per cell.
+    
+    Returns GeoJSON FeatureCollection with mean/min/max/std NDVI per grid cell.
+    Useful for fast hover interactions on large ROIs.
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.ndvi_service import NDVIService
+        result = NDVIService.generate_ndvi_grid(
+            roi_geojson=request.roi,
+            cell_size_km=request.cellSizeKm,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale,
+            cloud_threshold=request.cloudThreshold
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=500, detail=result.get("error", "Grid generation failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in NDVI grid endpoint: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/ndvi/sample-batch")
+async def sample_ndvi_batch(request: NDVIBatchSampleRequest):
+    """Sample NDVI at multiple points in batch.
+    
+    More efficient than calling /ndvi/sample multiple times.
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.ndvi_service import NDVIService
+        result = NDVIService.sample_ndvi_batch(
+            points=request.points,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale,
+            cloud_threshold=request.cloudThreshold
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=500, detail=result.get("error", "Batch sampling failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in NDVI batch sample endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/lst/sample")
+async def sample_lst_value(request: LSTSampleRequest):
+    """Sample median LST at a given coordinate (lng, lat)."""
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.lst_service import LSTService
+        result = LSTService.sample_lst_at_point(
+            lng=request.lng,
+            lat=request.lat,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=404, detail=result.get("error", "Sampling failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in LST sample endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/lst/grid")
+async def generate_lst_grid(request: LSTGridRequest):
+    """Generate a vector grid over ROI with LST statistics per cell.
+    
+    Returns GeoJSON FeatureCollection with mean/min/max/std LST per grid cell.
+    Useful for fast hover interactions on large ROIs.
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.lst_service import LSTService
+        result = LSTService.generate_lst_grid(
+            roi_geojson=request.roi,
+            cell_size_km=request.cellSizeKm,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=500, detail=result.get("error", "Grid generation failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in LST grid endpoint: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/lst/sample-batch")
+async def sample_lst_batch(request: LSTBatchSampleRequest):
+    """Sample LST at multiple points in batch.
+    
+    More efficient than calling /lst/sample multiple times.
+    """
+    if not gee_initialized:
+        raise HTTPException(status_code=503, detail="GEE service not initialized")
+    try:
+        from services.lst_service import LSTService
+        result = LSTService.sample_lst_batch(
+            points=request.points,
+            start_date=request.startDate,
+            end_date=request.endDate,
+            scale=request.scale
+        )
+        if not result.get("success", False):
+            raise HTTPException(status_code=500, detail=result.get("error", "Batch sampling failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in LST batch sample endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/lst/land-surface-temperature", response_model=TileResponse)
 async def analyze_lst(request: LSTRequest):

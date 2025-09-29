@@ -195,13 +195,20 @@ class LocationNER:
                 
             parsed = json.loads(json_content)
             
-            # Handle both array format and object with "locations" key
+            # Handle formats: array, object with "locations", or single location object
             if isinstance(parsed, list):
                 locations_data = parsed
-            elif isinstance(parsed, dict) and "locations" in parsed:
-                locations_data = parsed["locations"]
+            elif isinstance(parsed, dict):
+                if "locations" in parsed and isinstance(parsed["locations"], list):
+                    locations_data = parsed["locations"]
+                elif all(k in parsed for k in ("matched_name", "type", "confidence")):
+                    # Accept single location object
+                    locations_data = [parsed]
+                else:
+                    logger.warning(f"Unexpected LLM response dict keys: {list(parsed.keys())}")
+                    return []
             else:
-                logger.warning(f"Unexpected LLM response format: {type(parsed)}")
+                logger.warning(f"Unexpected LLM response type: {type(parsed)}")
                 return []
                 
             # Validate and convert to LocationEntity objects
@@ -309,6 +316,10 @@ class LocationNER:
             'coimbatore': ('Coimbatore', 'city', 95),
             'vijayawada': ('Vijayawada', 'city', 95),
             'jodhpur': ('Jodhpur', 'city', 95),
+            'udaipur': ('Udaipur', 'city', 95),
+            'leh': ('Leh', 'city', 95),
+            'ladakh': ('Ladakh', 'state', 95),
+            'kargil': ('Kargil', 'city', 95),
             'madurai': ('Madurai', 'city', 95),
             'raipur': ('Raipur', 'city', 95),
             'kota': ('Kota', 'city', 95),

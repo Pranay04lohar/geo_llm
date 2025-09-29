@@ -56,6 +56,382 @@ class NDVIService:
     ]
     
     @staticmethod
+    def sample_ndvi_at_point(
+        lng: float,
+        lat: float,
+        start_date: str = "2023-06-01",
+        end_date: str = "2023-08-31",
+        scale: int = 30,
+        cloud_threshold: float = 20
+    ) -> Dict[str, Any]:
+        """Sample median NDVI value at a coordinate.
+        
+        Args:
+            lng: Longitude
+            lat: Latitude
+            start_date: Start date for analysis
+            end_date: End date for analysis
+            scale: Processing scale in meters (default 30m for Sentinel-2)
+            cloud_threshold: Max cloud cover percentage
+            
+        Returns:
+            Dict with NDVI value and metadata
+        """
+        try:
+            point = ee.Geometry.Point([float(lng), float(lat)])
+            
+            # Load Sentinel-2 collection
+            s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                .filterBounds(point) \
+                .filterDate(start_date, end_date) \
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_threshold))
+            
+            collection_size = s2_collection.size().getInfo()
+            if collection_size == 0:
+                return {"success": False, "error": "no_data"}
+            
+            # Cloud masking
+            def mask_s2_clouds(image):
+                qa = image.select('QA60')
+                cloud_bit_mask = 1 << 10
+                cirrus_bit_mask = 1 << 11
+                mask = qa.bitwiseAnd(cloud_bit_mask).eq(0) \
+                    .And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+                return image.updateMask(mask).divide(10000)
+            
+            def add_ndvi(image):
+                ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+                return image.addBands(ndvi)
+            
+            processed_collection = s2_collection.map(mask_s2_clouds).map(add_ndvi)
+            median_ndvi = processed_collection.select('NDVI').median()
+            
+            # Buffer the point slightly to avoid nulls at exact pixel edges
+            buffer_meters = max(int(scale / 2), 15)
+            region = point.buffer(buffer_meters)
+            
+            sampled = median_ndvi.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=region,
+                scale=scale,
+                maxPixels=1e6,
+                bestEffort=True
+            ).getInfo()
+            
+            value = sampled.get('NDVI', None)
+            if value is None:
+                return {"success": False, "error": "no_value"}
+            
+            # Classify vegetation type
+            vegetation_type = "Unknown"
+            if value < -0.1:
+                vegetation_type = "Water/No Vegetation"
+            elif value < 0.1:
+                vegetation_type = "Bare Soil/Urban"
+            elif value < 0.3:
+                vegetation_type = "Sparse Vegetation"
+            elif value < 0.6:
+                vegetation_type = "Moderate Vegetation"
+            else:
+                vegetation_type = "Dense Vegetation"
+            
+            return {
+                "success": True,
+                "value_ndvi": float(value),
+                "vegetation_type": vegetation_type,
+                "scale_meters": scale,
+                "buffer_meters": buffer_meters,
+                "date_range": {"start": start_date, "end": end_date},
+                "dataset": "Sentinel-2",
+                "images_used": collection_size
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error sampling NDVI at point: {e}")
+            return {"success": False, "error": str(e)}
+    
+    @staticmethod
+    def generate_ndvi_grid(
+        roi_geojson: Dict[str, Any],
+        cell_size_km: float = 1.0,
+        start_date: str = "2023-06-01",
+        end_date: str = "2023-08-31",
+        scale: int = 30,
+        cloud_threshold: float = 20
+    ) -> Dict[str, Any]:
+        """Generate a vector grid over ROI with NDVI statistics per cell.
+        
+        Args:
+            roi_geojson: GeoJSON Polygon or MultiPolygon for ROI
+            cell_size_km: Grid cell size in kilometers (default 1km)
+            start_date: Start date for NDVI data
+            end_date: End date for NDVI data
+            scale: Processing scale in meters
+            cloud_threshold: Max cloud cover percentage
+            
+        Returns:
+            GeoJSON FeatureCollection with NDVI stats per grid cell
+        """
+        try:
+            logger.info(f"🔷 Generating NDVI grid: cell_size={cell_size_km}km")
+            
+            # Parse ROI geometry
+            roi = ee.Geometry(roi_geojson)
+            bounds = roi.bounds().coordinates().getInfo()[0]
+            min_lng, min_lat = bounds[0][0], bounds[0][1]
+            max_lng, max_lat = bounds[2][0], bounds[2][1]
+            
+            # Load Sentinel-2 collection
+            s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                .filterBounds(roi) \
+                .filterDate(start_date, end_date) \
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_threshold))
+            
+            collection_size = s2_collection.size().getInfo()
+            if collection_size == 0:
+                return {"success": False, "error": "no_data"}
+            
+            # Cloud masking and NDVI computation
+            def mask_s2_clouds(image):
+                qa = image.select('QA60')
+                cloud_bit_mask = 1 << 10
+                cirrus_bit_mask = 1 << 11
+                mask = qa.bitwiseAnd(cloud_bit_mask).eq(0) \
+                    .And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+                return image.updateMask(mask).divide(10000)
+            
+            def add_ndvi(image):
+                ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+                return image.addBands(ndvi)
+            
+            processed_collection = s2_collection.map(mask_s2_clouds).map(add_ndvi)
+            median_ndvi = processed_collection.select('NDVI').median()
+            
+            # Convert km to degrees
+            cell_deg = cell_size_km / 111.0
+            
+            # Generate grid cells
+            features = []
+            cell_id = 0
+            
+            lat = min_lat
+            while lat < max_lat:
+                lng = min_lng
+                while lng < max_lng:
+                    # Create cell polygon
+                    cell_coords = [
+                        [lng, lat],
+                        [lng + cell_deg, lat],
+                        [lng + cell_deg, lat + cell_deg],
+                        [lng, lat + cell_deg],
+                        [lng, lat]
+                    ]
+                    cell_poly = ee.Geometry.Polygon([cell_coords])
+                    
+                    # Check if cell intersects ROI
+                    if not roi.intersects(cell_poly).getInfo():
+                        lng += cell_deg
+                        continue
+                    
+                    # Compute NDVI statistics for this cell
+                    try:
+                        stats = median_ndvi.reduceRegion(
+                            reducer=ee.Reducer.mean()
+                                .combine(ee.Reducer.min(), '', True)
+                                .combine(ee.Reducer.max(), '', True)
+                                .combine(ee.Reducer.stdDev(), '', True),
+                            geometry=cell_poly.intersection(roi),
+                            scale=scale,
+                            maxPixels=1e8,
+                            bestEffort=True
+                        ).getInfo()
+                        
+                        mean_ndvi = stats.get('NDVI_mean')
+                        min_ndvi = stats.get('NDVI_min')
+                        max_ndvi = stats.get('NDVI_max')
+                        std_ndvi = stats.get('NDVI_stdDev')
+                        
+                        # Only include cells with valid data
+                        if mean_ndvi is not None:
+                            # Classify vegetation type
+                            if mean_ndvi < -0.1:
+                                veg_type = "Water/No Vegetation"
+                            elif mean_ndvi < 0.1:
+                                veg_type = "Bare Soil/Urban"
+                            elif mean_ndvi < 0.3:
+                                veg_type = "Sparse Vegetation"
+                            elif mean_ndvi < 0.6:
+                                veg_type = "Moderate Vegetation"
+                            else:
+                                veg_type = "Dense Vegetation"
+                            
+                            feature = {
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "Polygon",
+                                    "coordinates": [cell_coords]
+                                },
+                                "properties": {
+                                    "cell_id": cell_id,
+                                    "mean_ndvi": round(float(mean_ndvi), 3),
+                                    "min_ndvi": round(float(min_ndvi), 3) if min_ndvi else None,
+                                    "max_ndvi": round(float(max_ndvi), 3) if max_ndvi else None,
+                                    "std_ndvi": round(float(std_ndvi), 3) if std_ndvi else None,
+                                    "vegetation_type": veg_type,
+                                    "cell_size_km": cell_size_km
+                                }
+                            }
+                            features.append(feature)
+                            cell_id += 1
+                    except Exception as cell_error:
+                        logger.warning(f"Failed to process cell at ({lng}, {lat}): {cell_error}")
+                    
+                    lng += cell_deg
+                lat += cell_deg
+            
+            logger.info(f"✅ Generated {len(features)} NDVI grid cells")
+            
+            return {
+                "success": True,
+                "type": "FeatureCollection",
+                "features": features,
+                "metadata": {
+                    "cell_size_km": cell_size_km,
+                    "cell_count": len(features),
+                    "date_range": {"start": start_date, "end": end_date},
+                    "dataset": "Sentinel-2",
+                    "images_used": collection_size
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating NDVI grid: {e}")
+            return {"success": False, "error": str(e)}
+    
+    @staticmethod
+    def sample_ndvi_batch(
+        points: List[Dict[str, float]],
+        start_date: str = "2023-06-01",
+        end_date: str = "2023-08-31",
+        scale: int = 30,
+        cloud_threshold: float = 20
+    ) -> Dict[str, Any]:
+        """Sample NDVI at multiple points in batch.
+        
+        Args:
+            points: List of {"lng": x, "lat": y} dicts
+            start_date: Start date for NDVI data
+            end_date: End date for NDVI data
+            scale: Processing scale in meters
+            cloud_threshold: Max cloud cover percentage
+            
+        Returns:
+            Dict with "success" and "results" list
+        """
+        try:
+            logger.info(f"🔷 Batch sampling {len(points)} NDVI points")
+            
+            # Create bounding box for all points
+            lngs = [p["lng"] for p in points]
+            lats = [p["lat"] for p in points]
+            bbox = ee.Geometry.Rectangle([min(lngs), min(lats), max(lngs), max(lats)])
+            
+            # Load Sentinel-2 collection once for all points
+            s2_collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+                .filterBounds(bbox) \
+                .filterDate(start_date, end_date) \
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_threshold))
+            
+            collection_size = s2_collection.size().getInfo()
+            if collection_size == 0:
+                return {"success": False, "error": "no_data"}
+            
+            # Cloud masking and NDVI computation
+            def mask_s2_clouds(image):
+                qa = image.select('QA60')
+                cloud_bit_mask = 1 << 10
+                cirrus_bit_mask = 1 << 11
+                mask = qa.bitwiseAnd(cloud_bit_mask).eq(0) \
+                    .And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+                return image.updateMask(mask).divide(10000)
+            
+            def add_ndvi(image):
+                ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+                return image.addBands(ndvi)
+            
+            processed_collection = s2_collection.map(mask_s2_clouds).map(add_ndvi)
+            median_ndvi = processed_collection.select('NDVI').median()
+            
+            results = []
+            for idx, pt in enumerate(points):
+                try:
+                    lng, lat = pt["lng"], pt["lat"]
+                    point = ee.Geometry.Point([float(lng), float(lat)])
+                    buffer_meters = max(int(scale / 2), 15)
+                    region = point.buffer(buffer_meters)
+                    
+                    sampled = median_ndvi.reduceRegion(
+                        reducer=ee.Reducer.mean(),
+                        geometry=region,
+                        scale=scale,
+                        maxPixels=1e6,
+                        bestEffort=True
+                    ).getInfo()
+                    
+                    value = sampled.get('NDVI', None)
+                    
+                    if value is not None:
+                        # Classify vegetation type
+                        if value < -0.1:
+                            veg_type = "Water/No Vegetation"
+                        elif value < 0.1:
+                            veg_type = "Bare Soil/Urban"
+                        elif value < 0.3:
+                            veg_type = "Sparse Vegetation"
+                        elif value < 0.6:
+                            veg_type = "Moderate Vegetation"
+                        else:
+                            veg_type = "Dense Vegetation"
+                        
+                        results.append({
+                            "index": idx,
+                            "lng": lng,
+                            "lat": lat,
+                            "value_ndvi": float(value),
+                            "vegetation_type": veg_type,
+                            "success": True
+                        })
+                    else:
+                        results.append({
+                            "index": idx,
+                            "lng": lng,
+                            "lat": lat,
+                            "success": False,
+                            "error": "no_value"
+                        })
+                except Exception as pt_error:
+                    logger.warning(f"Failed to sample point {idx}: {pt_error}")
+                    results.append({
+                        "index": idx,
+                        "lng": pt.get("lng"),
+                        "lat": pt.get("lat"),
+                        "success": False,
+                        "error": str(pt_error)
+                    })
+            
+            logger.info(f"✅ Batch sampled {len(results)} NDVI points")
+            
+            return {
+                "success": True,
+                "count": len(results),
+                "results": results
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in NDVI batch sampling: {e}")
+            return {"success": False, "error": str(e)}
+    
+    @staticmethod
     def _compute_ndvi_histogram(
         ndvi_image: ee.Image,
         geometry: ee.Geometry,
@@ -684,8 +1060,8 @@ class NDVIService:
             
             # Generate tile URLs for visualization
             vis_params = {
-                'min': -0.3,  # Adjusted to show water/urban areas better
-                'max': 0.2,   # Adjusted to actual data range
+                'min': -0.2,  # Water and bare soil
+                'max': 0.8,   # Dense vegetation (full NDVI range)
                 'palette': NDVIService.NDVI_PALETTE
             }
             map_id = median_ndvi.getMapId(vis_params)
@@ -1112,8 +1488,8 @@ class NDVIService:
             # Generate visualization
             logger.info("Generating NDVI visualization...")
             vis_params = {
-                'min': -0.3,  # Adjusted to show water/urban areas better
-                'max': 0.2,   # Adjusted to actual data range
+                'min': -0.2,  # Water and bare soil
+                'max': 0.8,   # Dense vegetation (full NDVI range)
                 'palette': NDVIService.NDVI_PALETTE
             }
             
