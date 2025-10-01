@@ -9,9 +9,10 @@ import MiniMap from '@/components/MiniMap'
 import FullScreenMap from '@/components/FullScreenMap'
 import AuthButton from '@/components/AuthButton'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import { useChatHistory } from '@/hooks/useChatHistory'
 
 function HomeContent() {
-  const { token, isAuthenticated } = useAuth();
+  const { token, isAuthenticated, userInfo } = useAuth();
   const [leftCollapsed, setLeftCollapsed] = useState(true) // Default to collapsed
   const [rightCollapsed, setRightCollapsed] = useState(true) // Deprecated: right panel removed
   const [isHydrated, setIsHydrated] = useState(false)
@@ -27,6 +28,22 @@ function HomeContent() {
   const [roiData, setRoiData] = useState([])
   const [ragSessionId, setRagSessionId] = useState('')
   const [ragMessage, setRagMessage] = useState('')
+
+  // Chat history management
+  const {
+    conversations,
+    currentConversation,
+    currentMessages,
+    loading: chatLoading,
+    error: chatError,
+    createConversation,
+    loadConversation,
+    sendMessage,
+    deleteConversation,
+    updateConversation,
+    clearCurrentConversation,
+    hasConversations
+  } = useChatHistory();
 
   // Load from localStorage after hydration
   useEffect(() => {
@@ -46,6 +63,21 @@ function HomeContent() {
     
     setIsHydrated(true)
   }, [])
+
+  // Load messages from current conversation
+  useEffect(() => {
+    if (currentMessages && currentMessages.length > 0) {
+      const formattedMessages = currentMessages.map(msg => ({
+        type: msg.role,
+        content: msg.content,
+        id: msg.id
+      }));
+      setMessages(formattedMessages);
+    } else if (currentConversation && currentMessages.length === 0) {
+      // Clear messages if conversation has no messages
+      setMessages([]);
+    }
+  }, [currentMessages, currentConversation])
 
   // Save state to localStorage whenever it changes
   const updateLeftCollapsed = (collapsed) => {
@@ -111,6 +143,17 @@ function HomeContent() {
     }
   }, [messages])
 
+  // Save message to database
+  const saveMessageToDB = async (role, content, metadata = null) => {
+    if (!isAuthenticated || !currentConversation) return;
+    
+    try {
+      await sendMessage(currentConversation.id, role, content, metadata);
+    } catch (error) {
+      console.error('Failed to save message to database:', error);
+    }
+  };
+
   // Clear chat messages
   const clearChat = () => {
     setMessages([])
@@ -120,6 +163,7 @@ function HomeContent() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('geollm-chat-messages')
     }
+    clearCurrentConversation()
   }
 
 
@@ -187,7 +231,17 @@ function HomeContent() {
             {/* New Chat Button with Gradient */}
             <button 
               id="new-chat-button"
-              className="new-chat-button w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-6 py-4 flex items-center gap-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-[1.02] font-semibold text-base"
+              className="new-chat-button w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-6 py-4 flex items-center gap-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-[1.02] font-semibold text-base disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={async () => {
+                if (isAuthenticated) {
+                  // Open a fresh chat like ChatGPT: don't create on click; wait for first message
+                  clearChat();
+                  clearCurrentConversation();
+                } else {
+                  alert('Please sign in to create a new chat');
+                }
+              }}
+              disabled={!isAuthenticated}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -213,58 +267,117 @@ function HomeContent() {
           
           {/* Chat History */}
           <div className="flex-1 overflow-y-auto px-6 space-y-3">
-            <div className="text-xs text-white/60 uppercase tracking-wider mb-4 font-semibold">Recent Chats</div>
-            {[
-              { title: "Population data analysis", icon: "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" },
-              { title: "Boundary extraction India", icon: "M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" },
-              { title: "Geospatial clustering", icon: "M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V6a2 2 0 00-2-2" },
-              { title: "Satellite imagery analysis", icon: "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0-9v9" }
-            ].map((chat, index) => (
-              <div key={index} className="bg-white/8 rounded-2xl p-4 cursor-pointer transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-[1.02] border border-white/10 group">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center transition-all duration-200">
-                    <svg className="w-4 h-4 text-white/70 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={chat.icon} />
-                    </svg>
+            <div className="text-xs text-white/60 uppercase tracking-wider mb-4 font-semibold">
+              {isAuthenticated ? 'Recent Chats' : 'Sign in to view chat history'}
+            </div>
+            
+            {isAuthenticated ? (
+              chatLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-white/60 text-sm">Loading conversations...</div>
+                </div>
+              ) : chatError ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-red-400 text-sm">Error loading conversations</div>
+                </div>
+              ) : hasConversations ? (
+                conversations.map((conversation) => (
+                  <div 
+                    key={conversation.id} 
+                    className={`bg-white/8 rounded-2xl p-4 cursor-pointer transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-[1.02] border border-white/10 group ${
+                      currentConversation?.id === conversation.id ? 'bg-white/12 border-white/20' : ''
+                    }`}
+                    onClick={() => loadConversation(conversation.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center transition-all duration-200">
+                        <svg className="w-4 h-4 text-white/70 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white/90 text-sm truncate transition-colors duration-200">
+                          {conversation.title}
+                        </p>
+                        <p className="text-white/50 text-xs mt-1">
+                          {conversation.message_count} messages • {new Date(conversation.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteConversation(conversation.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-white/10 rounded"
+                        title="Delete conversation"
+                      >
+                        <svg className="w-4 h-4 text-white/60 hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-white/90 text-sm truncate transition-colors duration-200 flex-1">{chat.title}</p>
+                ))
+              ) : (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-white/60 text-sm text-center">
+                    No conversations yet.<br />
+                    Start a new chat to begin!
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-white/60 text-sm text-center">
+                  Sign in to view your<br />
+                  chat history
                 </div>
               </div>
-            ))}
+            )}
           </div>
           
           {/* User Info */}
           <div className="p-6 border-t border-white/10">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-full flex items-center justify-center shadow-lg border border-blue-500/30 transition-all duration-200 hover:shadow-xl hover:scale-105">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+            {isAuthenticated && userInfo ? (
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-full flex items-center justify-center shadow-lg border border-blue-500/30 transition-all duration-200 hover:shadow-xl hover:scale-105 overflow-hidden">
+                  {userInfo.picture ? (
+                    <img 
+                      src={userInfo.picture} 
+                      alt={userInfo.name || 'User'} 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-base font-semibold truncate">
+                    {userInfo.name || 'User'}
+                  </p>
+                  <p className="text-white/60 text-sm flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Free Plan
+                  </p>
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="text-white text-base font-semibold">Mohit</p>
-                <p className="text-white/60 text-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            ) : (
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-r from-gray-600 to-gray-700 rounded-full flex items-center justify-center shadow-lg border border-gray-500/30">
+                  <svg className="w-6 h-6 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  Free Plan
-                </p>
+                </div>
+                <div className="flex-1">
+                  <p className="text-white/60 text-base font-semibold">Not signed in</p>
+                  <p className="text-white/40 text-sm">Sign in to access features</p>
+                </div>
               </div>
-            </div>
-            {/* Notification Indicator */}
-            <div className="bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-2xl px-4 py-3 flex items-center justify-between shadow-lg border border-blue-500/30 transition-all duration-200 hover:shadow-xl hover:scale-105">
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4.19 4.19A2 2 0 006.32 3h11.36a2 2 0 011.13 1.19L21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5l3.62-10.81z" />
-                </svg>
-                <span className="text-white text-sm font-medium">2 Updates</span>
-              </div>
-              <button className="text-white/80 text-sm transition-all duration-200 hover:scale-110 hover:text-white">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+            )}
           </div>
         </CollapsibleSidebar>
         
@@ -463,6 +576,20 @@ function HomeContent() {
                         // Add user message immediately
                         setMessages(prev => [...prev, { type: 'user', content: userPrompt }])
                         
+                        // If there's no active conversation yet, create one now (ChatGPT-style)
+                        let activeConversationId = currentConversation?.id
+                        if (isAuthenticated && !activeConversationId) {
+                          const newConv = await createConversation('New Chat')
+                          if (newConv?.id) {
+                            activeConversationId = newConv.id
+                            await loadConversation(newConv.id)
+                          }
+                        }
+                        // Save user message to database when we have a conversation
+                        if (isAuthenticated && (currentConversation?.id || activeConversationId)) {
+                          saveMessageToDB('user', userPrompt);
+                        }
+                        
                         setIsProcessing(true)
                         setEarthSpeed(0.0005)
                         
@@ -484,16 +611,29 @@ function HomeContent() {
                           cotTimersRef.current.push(id)
                         })
                         
-                        // Call retrieval API
+                        // Decide whether to call RAG retrieval
                         try {
                           let responseText = ''
                           let fullJson = null
+                          let shouldUseRag = false
                           if (ragSessionId) {
+                            try {
+                              const stats = await ragGetSessionStats(ragSessionId)
+                              shouldUseRag = !!stats && (stats.document_count || 0) > 0
+                            } catch (e) {
+                              console.warn('Failed to read session stats; skipping RAG.', e)
+                              shouldUseRag = false
+                            }
+                          }
+
+                          if (shouldUseRag) {
+                            // Robust path: use detailed endpoint with session_id
                             fullJson = await ragRetrieveDetailed(ragSessionId, userPrompt, 5, false, token)
                             responseText = (fullJson?.results?.[0]?.content) || 'No results found.'
                           } else {
-                            fullJson = await ragRetrieveSimple(userPrompt, token)
-                            responseText = (fullJson?.retrieved_chunks?.[0]?.content) || 'No results found.'
+                            // Keep chat independent of RAG when no docs/session
+                            responseText = 'Upload documents to use retrieval, or continue chatting.'
+                            fullJson = { reason: 'rag_disabled', sessionId: ragSessionId || null }
                           }
                           // Log full JSON for debugging/inspection
                           console.log('RAG retrieval result:', fullJson)
@@ -503,6 +643,22 @@ function HomeContent() {
                               ? { type: 'assistant', content: responseText }
                               : msg
                           ))
+                          
+                          // Save assistant message to database
+                          if (isAuthenticated && (currentConversation?.id || activeConversationId)) {
+                            saveMessageToDB('assistant', responseText, { ragSessionId, retrievalResult: fullJson });
+                          }
+
+                          // If this was the first user message in a new chat, rename conversation to first prompt
+                          if (isAuthenticated && (currentConversation?.id || activeConversationId)) {
+                            const convId = currentConversation?.id || activeConversationId
+                            const derivedTitle = userPrompt.trim().slice(0, 40) || 'New Chat'
+                            try {
+                              await updateConversation(convId, { title: derivedTitle })
+                            } catch (e) {
+                              console.warn('Failed to update conversation title', e)
+                            }
+                          }
                         } catch (e) {
                           console.error('RAG retrieval failed:', e)
                           setMessages(prev => prev.map(msg => 
@@ -510,6 +666,11 @@ function HomeContent() {
                               ? { type: 'assistant', content: 'Retrieval failed. Please try again.' }
                               : msg
                           ))
+                          
+                          // Save error message to database
+                          if (isAuthenticated && currentConversation) {
+                            saveMessageToDB('assistant', 'Retrieval failed. Please try again.', { error: e.message });
+                          }
                         }
                         
                         setIsProcessing(false)

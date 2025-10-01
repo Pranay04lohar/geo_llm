@@ -1,0 +1,47 @@
+# Production Requirements for GeoLLM Backend
+# Core FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+aiosqlite==0.19.0
+
+# Authentication
+firebase-admin==6.4.0
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# AI/ML
+sentence-transformers==2.2.2
+transformers==4.36.0
+torch==2.1.0
+faiss-cpu==1.7.4
+numpy==1.24.3
+
+# Document processing
+pdfplumber==0.10.3
+python-docx==1.1.0
+PyMuPDF==1.23.8
+pytesseract==0.3.10
+Pillow==10.1.0
+
+# Data processing
+nltk==3.8.1
+regex==2023.10.3
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# HTTP client
+httpx==0.25.2
+
+# Environment
+python-dotenv==1.0.0
+
+# File handling
+python-multipart==0.0.6

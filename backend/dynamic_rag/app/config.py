@@ -44,7 +44,10 @@ class Settings(BaseSettings):
     
     # Security
     secret_key: str = "your-secret-key-change-in-production"
-    allowed_file_types: List[str] = Field(default_factory=lambda: [".pdf", ".txt", ".docx", ".md"]) 
+    allowed_file_types: List[str] = Field(default_factory=lambda: [".pdf", ".txt", ".docx", ".md"])
+    
+    # Database
+    database_url: str = "sqlite+aiosqlite:///./chat_history.db" 
 
     # Pydantic v2 settings config
     model_config = SettingsConfigDict(

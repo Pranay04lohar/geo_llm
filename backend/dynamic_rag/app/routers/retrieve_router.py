@@ -24,6 +24,25 @@ from auth.middleware.firebase_auth_middleware import get_current_user_uid
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+def get_rag_store(request: Request) -> RAGStore:
+    return request.app.state.rag_store
+
+@router.post(
+    "/session",
+    summary="Create a new RAG session",
+)
+async def create_session(
+    request: Request,
+    user_id: str = Depends(get_current_user_uid),
+    rag_store: RAGStore = Depends(get_rag_store)
+):
+    """Create a new ephemeral RAG session for the authenticated user."""
+    try:
+        session_id = await rag_store.create_session(user_id)
+        return {"session_id": session_id}
+    except Exception as e:
+        logger.error(f"Failed to create session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create session")
 
 # Create router
 router = APIRouter()

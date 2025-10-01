@@ -26,5 +26,8 @@ pydantic-settings
 pytest
 pytest-asyncio
 httpx
+sqlalchemy
+aiosqlite
+alembic
 
 

@@ -151,4 +151,108 @@ export async function deleteSession(sessionId) {
   return res.json();
 }
 
+// Chat History API functions
+export async function getChatConversations(limit = 50, offset = 0) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  const headers = await withAuthHeaders();
+  const res = await fetch(`${API_BASE}/conversations?${params.toString()}`, { headers });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to view chat history.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createChatConversation(title) {
+  const headers = await withAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/conversations`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ title }),
+  });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to create conversations.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getChatConversation(conversationId) {
+  const headers = await withAuthHeaders();
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}`, { headers });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to view conversation.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (res.status === 404) throw new Error('Conversation not found.');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getChatMessages(conversationId, limit = 100, offset = 0) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  const headers = await withAuthHeaders();
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}/messages?${params.toString()}`, { headers });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to view messages.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (res.status === 404) throw new Error('Conversation not found.');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function addChatMessage(conversationId, role, content, metadata = null) {
+  const headers = await withAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ conversation_id: conversationId, role, content, metadata }),
+  });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to send messages.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (res.status === 404) throw new Error('Conversation not found.');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateChatConversation(conversationId, updates) {
+  const headers = await withAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(updates),
+  });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to update conversation.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (res.status === 404) throw new Error('Conversation not found.');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteChatConversation(conversationId) {
+  const headers = await withAuthHeaders();
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  if (res.status === 401) {
+    triggerAlert('error', 'Sign in required', 'Please sign in to delete conversation.');
+    throw new Error('Unauthorized: Please sign in.');
+  }
+  if (res.status === 404) throw new Error('Conversation not found.');
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 

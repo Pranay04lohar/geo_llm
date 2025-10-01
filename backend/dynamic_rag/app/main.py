@@ -12,6 +12,14 @@ How:  Uses FastAPI lifespan to initialize a single RAGStore instance on startup
       and gracefully clean up on shutdown. Routers are mounted under /api/v1.
 """
 
+# Ensure project-root (backend) is on PYTHONPATH so `auth.*` imports resolve
+import os
+import sys
+_APP_DIR = os.path.dirname(__file__)
+_BACKEND_DIR = os.path.abspath(os.path.join(_APP_DIR, '..', '..'))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -20,10 +28,12 @@ import uvicorn
 from app.routers import ingest_router, retrieve_router
 from app.routers import embeddings_router
 from app.routers import auth_router
+from app.routers import chat_router
 from auth.routers.user_router import router as user_router
 from app.services.rag_store import RAGStore
 from auth.middleware.firebase_auth_middleware import FirebaseAuthMiddleware
 from app.config import settings
+from app.database import init_db, close_db
 
 
 @asynccontextmanager
@@ -34,6 +44,9 @@ async def lifespan(app: FastAPI):
     print(f"📊 Redis URL: {settings.redis_url}")
     print(f"🔧 GPU Available: {settings.use_gpu}")
     
+    # Initialize database
+    await init_db()
+    
     # Initialize RAG store
     app.state.rag_store = RAGStore()
     await app.state.rag_store.initialize()
@@ -43,6 +56,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     print("🛑 Shutting down Dynamic RAG System...")
     await app.state.rag_store.cleanup()
+    await close_db()
 
 
 # Create FastAPI application
@@ -71,6 +85,7 @@ app.include_router(ingest_router.router, prefix="/api/v1", tags=["ingestion"])
 app.include_router(retrieve_router.router, prefix="/api/v1", tags=["retrieval"])
 app.include_router(embeddings_router.router, prefix="/api/v1", tags=["embeddings"])
 app.include_router(auth_router.router, prefix="/api/v1", tags=["auth"])
+app.include_router(chat_router.router, prefix="/api/v1", tags=["chat"])
 
 
 @app.get("/")
