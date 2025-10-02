@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+aiosqlite
+pydantic
+pydantic-settings
+google-auth
+firebase-admin
+python-dotenv
+
+
