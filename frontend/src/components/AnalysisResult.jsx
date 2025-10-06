@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import * as turf from "@turf/turf";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { FaExpand, FaEye, FaEyeSlash } from "react-icons/fa";
@@ -53,6 +54,7 @@ export default function AnalysisResult({ content }) {
   const textContent = hasMapData
     ? content.replace(/\[MAP_DATA:.*?\]$/, "").trim()
     : content;
+  const debugEnabled = process.env.NEXT_PUBLIC_DEBUG_MAP === "1";
 
   // Generate unique ID for this map instance
   const mapId = useRef(
@@ -70,6 +72,18 @@ export default function AnalysisResult({ content }) {
   const [showFullScreenMap, setShowFullScreenMap] = useState(false);
   const [hoverInfo, setHoverInfo] = useState(null);
   const [gridLoaded, setGridLoaded] = useState(false);
+  const initialError =
+    mapData?.error ||
+    (mapData?.limit_exceeded
+      ? `Area too large: ${
+          mapData.area_km2 != null ? mapData.area_km2.toLocaleString() : ""
+        } km² > ${
+          mapData.limit_km2 != null
+            ? mapData.limit_km2.toLocaleString()
+            : "limit"
+        }`
+      : null);
+  const [errorMessage, setErrorMessage] = useState(initialError);
   const mapContainer = useRef(null);
   const map = useRef(null);
   const lstGridData = useRef(null); // Store LST grid for instant hover
@@ -122,6 +136,11 @@ export default function AnalysisResult({ content }) {
         console.log("Map loaded successfully");
         setMapLoaded(true);
 
+        // If backend sent an error in analysis data, show it prominently
+        if (mapData?.error) {
+          setErrorMessage(mapData.error);
+        }
+
         // Add analysis layer if tile URL is available
         if (mapData.tile_url) {
           try {
@@ -162,6 +181,19 @@ export default function AnalysisResult({ content }) {
               },
             });
 
+            // Add a near-invisible ROI fill layer for reliable hit-testing
+            if (!map.current.getLayer("roi-hit")) {
+              map.current.addLayer({
+                id: "roi-hit",
+                type: "fill",
+                source: "roi",
+                paint: {
+                  "fill-color": "#ff0000",
+                  "fill-opacity": 0.001,
+                },
+              });
+            }
+
             map.current.addLayer({
               id: "roi-boundary",
               type: "line",
@@ -187,7 +219,8 @@ export default function AnalysisResult({ content }) {
         }
 
         // Load vector grid for instant hover (LST or NDVI analysis)
-        const analysisType = mapData.service_used?.toLowerCase();
+        // Use analysis_type to determine which workflow is active
+        const analysisType = mapData.analysis_type?.toLowerCase();
         if (
           (analysisType === "lst" || analysisType === "ndvi") &&
           mapData.roi?.geometry
@@ -218,61 +251,44 @@ export default function AnalysisResult({ content }) {
               if (gridData.success && gridData.features) {
                 lstGridData.current = gridData;
 
-                // Add grid layer to map (optional visualization)
+                // Add grid source (used for instant sampling). For NDVI we also visualize the grid fill;
+                // for LST we avoid adding a fill to prevent the map from looking washed out.
                 if (!map.current.getSource("lst-grid")) {
                   map.current.addSource("lst-grid", {
                     type: "geojson",
                     data: gridData,
                   });
 
-                  // Add fill layer for grid cells
-                  const fillPaint =
-                    analysisType === "lst"
-                      ? {
-                          "fill-color": [
-                            "interpolate",
-                            ["linear"],
-                            ["get", "mean_lst"],
-                            20,
-                            "#313695",
-                            25,
-                            "#4575b4",
-                            30,
-                            "#fee090",
-                            35,
-                            "#f46d43",
-                            40,
-                            "#a50026",
-                          ],
-                          "fill-opacity": 0.3,
-                        }
-                      : {
-                          "fill-color": [
-                            "interpolate",
-                            ["linear"],
-                            ["get", "mean_ndvi"],
-                            -0.2,
-                            "#d73027",
-                            0.0,
-                            "#fdae61",
-                            0.2,
-                            "#fee08b",
-                            0.4,
-                            "#abdda4",
-                            0.6,
-                            "#66c2a5",
-                            0.8,
-                            "#3288bd",
-                          ],
-                          "fill-opacity": 0.3,
-                        };
+                  // Only render the colored grid fill for NDVI; for LST keep the grid hidden (used just for sampling)
+                  if (analysisType === "ndvi") {
+                    const fillPaint = {
+                      "fill-color": [
+                        "interpolate",
+                        ["linear"],
+                        ["get", "mean_ndvi"],
+                        -0.2,
+                        "#d73027",
+                        0.0,
+                        "#fdae61",
+                        0.2,
+                        "#fee08b",
+                        0.4,
+                        "#abdda4",
+                        0.6,
+                        "#66c2a5",
+                        0.8,
+                        "#3288bd",
+                      ],
+                      "fill-opacity": 0.3,
+                    };
 
-                  map.current.addLayer({
-                    id: "lst-grid-fill",
-                    type: "fill",
-                    source: "lst-grid",
-                    paint: fillPaint,
-                  });
+                    map.current.addLayer({
+                      id: "lst-grid-fill",
+                      type: "fill",
+                      source: "lst-grid",
+                      paint: fillPaint,
+                    });
+                  }
 
                   // Add outline layer
                   map.current.addLayer({
@@ -282,7 +298,7 @@ export default function AnalysisResult({ content }) {
                     paint: {
                       "line-color": "#888",
                       "line-width": 0.5,
-                      "line-opacity": 0.4,
+                      "line-opacity": analysisType === "ndvi" ? 0.4 : 0.0,
                     },
                   });
                 }
@@ -434,6 +450,9 @@ export default function AnalysisResult({ content }) {
             console.log(
               `Fetching ${analysisType.toUpperCase()} sample from backend...`
             );
+            // avoid overlapping hover fetches
+            if (sampleDebounced._inFlight) return;
+            sampleDebounced._inFlight = true;
             const resp = await fetch(sampleEndpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -480,30 +499,66 @@ export default function AnalysisResult({ content }) {
             console.log("Tooltip updated with info:", info);
           } catch (e) {
             console.error("Hover sample error:", e);
+          } finally {
+            sampleDebounced._inFlight = false;
           }
         }, 300); // Increased to 300ms for large ROIs
 
-        // Check if point is inside ROI polygon (ray-casting algorithm)
-        const isInsideROI = (lng, lat) => {
-          if (!mapData.roi?.geometry) return true; // If no ROI, allow everywhere
-
-          const geom = mapData.roi.geometry;
-          if (geom.type === "Polygon") {
-            const coords = geom.coordinates[0];
-            let inside = false;
-            for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-              const xi = coords[i][0],
-                yi = coords[i][1];
-              const xj = coords[j][0],
-                yj = coords[j][1];
-              const intersect =
-                yi > lat !== yj > lat &&
-                lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-              if (intersect) inside = !inside;
-            }
-            return inside;
+        // Geographic inside-ROI test using Turf with MultiPolygon support and fallback
+        const isInsideROIAtPoint = (_point, lngLat) => {
+          if (!mapData.roi?.geometry) {
+            console.warn("No ROI geometry available");
+            return false;
           }
-          return true;
+
+          const geomType = mapData.roi.geometry.type;
+          const coords = mapData.roi.geometry.coordinates;
+
+          console.log(
+            `Checking point [${lngLat.lng.toFixed(4)}, ${lngLat.lat.toFixed(
+              4
+            )}] against ${geomType}`
+          );
+
+          try {
+            const pt = turf.point([lngLat.lng, lngLat.lat]);
+
+            if (geomType === "Polygon") {
+              const poly = turf.polygon(coords);
+              const result = turf.booleanPointInPolygon(pt, poly);
+              console.log(`Polygon check result: ${result}`);
+              return result;
+            } else if (geomType === "MultiPolygon") {
+              // Check across polygons
+              for (let i = 0; i < (coords?.length || 0); i++) {
+                const poly = turf.polygon(coords[i]);
+                const result = turf.booleanPointInPolygon(pt, poly);
+                if (result) {
+                  console.log(`Point found in polygon ${i} of MultiPolygon`);
+                  return true;
+                }
+              }
+              console.log("Point not in any polygon of MultiPolygon");
+              return false;
+            } else {
+              console.warn(`Unsupported geometry type: ${geomType}`);
+              return false;
+            }
+          } catch (e) {
+            console.error("ROI turf check failed:", e, {
+              geomType,
+              coordsLength: coords?.length,
+              point: [lngLat.lng, lngLat.lat],
+            });
+
+            // Fallback to ray-casting for simple polygon ring
+            if (geomType === "Polygon" && coords?.[0]) {
+              console.log("Falling back to ray-casting algorithm");
+              return isPointInPolygon(lngLat.lng, lngLat.lat, coords[0]);
+            }
+
+            return false;
+          }
         };
 
         map.current.on("mousemove", (e) => {
@@ -518,13 +573,15 @@ export default function AnalysisResult({ content }) {
           tooltip.style.visibility = "visible";
           tooltip.style.opacity = "1";
 
-          // Check if inside ROI before sampling
-          if (!isInsideROI(e.lngLat.lng, e.lngLat.lat)) {
+          // Check if inside ROI before sampling (using hit testing)
+          if (!isInsideROIAtPoint(e.point, e.lngLat)) {
             updateTooltipContent(null); // Show "Outside ROI"
             return;
           }
 
           // Sample LST (debounced)
+          // Immediately show sampling state to avoid stale "Outside ROI" while request is in-flight
+          updateTooltipContent({});
           sampleDebounced(e.lngLat);
         });
 
@@ -662,10 +719,16 @@ export default function AnalysisResult({ content }) {
   return (
     <div className="space-y-4">
       {/* Text content */}
-      <div className="whitespace-pre-wrap">{textContent}</div>
+      <div className="whitespace-pre-wrap">
+        {errorMessage ? (
+          <div className="text-red-700">{errorMessage}</div>
+        ) : (
+          textContent
+        )}
+      </div>
 
-      {/* Debug info - remove this in production */}
-      {!hasMapData && (
+      {/* Optional debug info */}
+      {!hasMapData && debugEnabled && (
         <div className="text-xs text-gray-400 border border-gray-200 rounded p-2">
           Debug: No map data found in content. Looking for [MAP_DATA:...]
           pattern.
@@ -707,6 +770,12 @@ export default function AnalysisResult({ content }) {
               </button>
             </div>
           </div>
+
+          {errorMessage && (
+            <div className="px-4 py-3 bg-red-50 text-red-700 border-b border-red-200 text-sm">
+              {errorMessage}
+            </div>
+          )}
 
           {showMap && (
             <div className="relative overflow-visible" key={mapId.current}>

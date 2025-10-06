@@ -47,11 +47,11 @@ def get_openrouter_config():
     return {
         "api_key": os.environ.get("OPENROUTER_API_KEY", "").strip(),
         # NER model - smaller, faster model for location extraction
-        "ner_model": os.environ.get("OPENROUTER_NER_MODEL", "meta-llama/llama-3.2-3b-instruct:free"),
+        "ner_model": os.environ.get("OPENROUTER_NER_MODEL", "openai/gpt-oss-20b:free"),
         # Intent classification model - medium model for intent understanding
-        "intent_model": os.environ.get("OPENROUTER_INTENT_MODEL", "meta-llama/llama-3.2-3b-instruct:free"),
+        "intent_model": os.environ.get("OPENROUTER_INTENT_MODEL", "openai/gpt-oss-20b:free"),
         # Response generation model - larger model for complex analysis
-        "response_model": os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free"),
+        "response_model": os.environ.get("OPENROUTER_RESPONSE_MODEL", "openai/gpt-oss-20b:free"),
         # Planner model - for backward compatibility
         "planner_model": os.environ.get("OPENROUTER_PLANNER_MODEL", os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free")), 
         "referrer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),

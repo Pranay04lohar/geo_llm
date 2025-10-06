@@ -346,17 +346,28 @@ class ServiceDispatcher:
             # Calculate timeout based on area size
             area_km2 = roi_info.get("area_km2", 0)
             timeout = self._calculate_timeout_for_area(area_km2, analysis_type)
+            # Cap timeouts to avoid very long stalls during development; separate connect vs read timeouts
+            connect_timeout = 10
+            read_timeout = min(timeout, 120)
             
             # Check if area is too large for analysis
-            if area_km2 > 20000:  # Areas larger than 20k km² are rejected
-                logger.warning(f"🚫 AREA TOO LARGE: {area_km2:.0f} km² exceeds 20,000 km² limit")
+            if area_km2 > 35000:  # Areas larger than 35k km² are rejected
+                logger.warning(f"🚫 AREA TOO LARGE: {area_km2:.0f} km² exceeds 35,000 km² limit")
                 return self._create_area_too_large_response(area_km2, analysis_type, roi_info)
             
             # Log warnings for large area analysis
             self._log_area_warnings(area_km2, analysis_type, timeout)
             
             # Standard single-request processing
-            response = requests.post(url, json=payload, timeout=timeout)
+            logger.info(
+                f"➡️  Calling GEE HTTP service {url} with timeout={read_timeout}s (connect={connect_timeout}s), area={area_km2:.0f} km²"
+            )
+            response = requests.post(
+                url,
+                json=payload,
+                timeout=(connect_timeout, read_timeout),
+            )
+            logger.info(f"⬅️  GEE service responded with status {response.status_code}")
             response.raise_for_status()
             result = response.json()
             
@@ -458,7 +469,7 @@ class ServiceDispatcher:
         error_message = (
             f"🚫 **Area Too Large for Analysis**\n\n"
             f"The requested area ({location_name}) covers {area_km2:,.0f} km², "
-            f"which exceeds our 20,000 km² processing limit.\n\n"
+            f"which exceeds our 35,000 km² processing limit.\n\n"
             f"**Why this limit exists:**\n"
             f"• Large areas require 15-30+ minutes to process\n"
             f"• High computational cost and resource usage\n"
@@ -483,20 +494,20 @@ class ServiceDispatcher:
                 "processing_time": 0.1,
                 "service_used": "size_validator",
                 "area_km2": area_km2,
-                "limit_km2": 20000,
+                "limit_km2": 35000,
                 "analysis_type": analysis_type
             },
             "sources": [],
             "confidence": 1.0,
             "analysis_data": {
                 "analysis_type": analysis_type,
-                "error": f"Area too large: {area_km2:,.0f} km² > 20,000 km² limit",
+                "error": f"Area too large: {area_km2:,.0f} km² > 35,000 km² limit",
                 "tile_url": None,
                 "area_km2": area_km2,
                 "limit_exceeded": True
             },
             "debug": {
-                "area_check": f"REJECTED: {area_km2:.0f} km² > 20,000 km² limit",
+                "area_check": f"REJECTED: {area_km2:.0f} km² > 35,000 km² limit",
                 "location": location_name,
                 "suggested_action": "Try a smaller, more specific location"
             }

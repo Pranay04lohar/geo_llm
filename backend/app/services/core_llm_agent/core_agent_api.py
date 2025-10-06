@@ -167,13 +167,20 @@ async def process_query(request: QueryRequest) -> QueryResponse:
                     analysis += f"• Max NDVI: {max_val}\n"
                     
         elif analysis_data:
-            # Generate natural language analysis from raw data
-            analysis_type = analysis_data.get("analysis_type", "analysis")
-            mean_val = analysis_data.get("mean_ndvi") or analysis_data.get("mean")
-            min_val = analysis_data.get("min_ndvi") or analysis_data.get("min")
-            max_val = analysis_data.get("max_ndvi") or analysis_data.get("max")
+            # If backend signaled an error in analysis_data, surface that directly
+            has_error = analysis_data.get("error") is not None
+            if has_error:
+                analysis = analysis_data.get("error")
+                analysis_type = "error"
+                mean_val = min_val = max_val = None
+            else:
+                # Generate natural language analysis from raw data
+                analysis_type = analysis_data.get("analysis_type", "analysis")
+                mean_val = analysis_data.get("mean_ndvi") or analysis_data.get("mean")
+                min_val = analysis_data.get("min_ndvi") or analysis_data.get("min")
+                max_val = analysis_data.get("max_ndvi") or analysis_data.get("max")
             
-            if analysis_type.lower() == "ndvi" and mean_val is not None:
+            if not has_error and analysis_type.lower() == "ndvi" and mean_val is not None:
                 # Extract location from ROI if available
                 location_name = "the region"
                 if result.get("roi") and result["roi"].get("display_name"):
@@ -188,7 +195,7 @@ async def process_query(request: QueryRequest) -> QueryResponse:
                     analysis += f"• Min NDVI: {min_val}\n"
                 if max_val is not None:
                     analysis += f"• Max NDVI: {max_val}\n"
-            elif analysis_type.lower() == "water":
+            elif not has_error and analysis_type.lower() == "water":
                 # Handle water analysis specifically
                 water_percentage = analysis_data.get("water_percentage")
                 non_water_percentage = analysis_data.get("non_water_percentage")
@@ -243,7 +250,7 @@ async def process_query(request: QueryRequest) -> QueryResponse:
                     analysis += f"📉 Min Value: {min_val}\n"
                 if max_val is not None:
                     analysis += f"📈 Max Value: {max_val}\n"
-                analysis += f"\n✅ Analysis completed successfully for the specified region."
+                # Do NOT append a success line if we don't have tiles; leave concise
         else:
             # Last resort fallback
             analysis = ai_analysis or "No analysis generated"

@@ -828,20 +828,28 @@ export default function Home() {
                               console.log("Core Agent response:", coreResponse);
 
                               // Extract map visualization data if available
-                              let mapData = null;
-                              if (coreResponse?.analysis_data?.tile_url) {
-                                mapData = {
-                                  tile_url: coreResponse.analysis_data.tile_url,
-                                  analysis_type:
-                                    coreResponse.analysis_data.analysis_type,
+                              // Always build map data from analysis_data, even on errors
+                              if (coreResponse?.analysis_data) {
+                                const ad = coreResponse.analysis_data;
+                                const mapData = {
+                                  tile_url: ad.tile_url || null,
+                                  analysis_type: ad.analysis_type,
                                   roi: coreResponse.roi,
                                   service_used: coreResponse.service_used,
+                                  error: ad.error,
+                                  limit_exceeded: ad.limit_exceeded,
+                                  area_km2: ad.area_km2,
+                                  limit_km2: ad.limit_km2,
                                 };
                                 console.log("Map data extracted:", mapData);
-                              }
 
-                              // Store map data in the message for later use
-                              if (mapData) {
+                                // Prepend visible error text if present
+                                if (ad.error) {
+                                  responseText =
+                                    `❌ ${ad.error}\n\n` + responseText;
+                                }
+
+                                // Attach map data block so AnalysisResult can render banners/tooltips
                                 responseText += `\n\n[MAP_DATA:${JSON.stringify(
                                   mapData
                                 )}]`;
