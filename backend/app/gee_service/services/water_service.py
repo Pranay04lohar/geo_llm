@@ -24,9 +24,8 @@ import ee
 
 logger = logging.getLogger(__name__)
 
-# Initialize Earth Engine with user authentication (for token generation)
+# Initialize Earth Engine at module level for thread safety
 try:
-    # Use user authentication (from 'earthengine authenticate') which supports token generation
     project_id = 'gee-tool-469517'
     ee.Initialize(project=project_id)
     logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
@@ -40,6 +39,10 @@ class WaterService:
     
     # JRC Global Surface Water dataset - This is an Image, not ImageCollection
     JRC_DATASET = 'JRC/GSW1_4/GlobalSurfaceWater'
+    
+    def __init__(self):
+        """Initialize the service"""
+        logger.info("✅ Water service initialized")
     
     # Official JRC water classes (from seasonality + max_extent bands)
     JRC_WATER_CLASSES = {
@@ -127,6 +130,10 @@ class WaterService:
     def _get_roi_geometry(self, roi: Dict[str, Any]) -> ee.Geometry:
         """Convert ROI dictionary to Earth Engine geometry"""
         try:
+            logger.info(f"🔍 Processing ROI: {roi}")
+            logger.info(f"🔍 ROI type: {roi.get('type')}")
+            logger.info(f"🔍 ROI keys: {list(roi.keys())}")
+            
             if roi.get('type') == 'Polygon':
                 coords = roi['coordinates']
                 return ee.Geometry.Polygon(coords)
@@ -215,12 +222,18 @@ class WaterService:
                 water_percentage = 0.0
                 non_water_percentage = 0.0
             
+            # Calculate area in km² (assuming 30m pixel size for JRC)
+            pixel_area_m2 = 30 * 30  # 30m x 30m = 900 m² per pixel
+            total_area_m2 = total_pixels * pixel_area_m2
+            total_area_km2 = total_area_m2 / 1_000_000
+            
             return {
                 "water_percentage": water_percentage,
                 "non_water_percentage": non_water_percentage,
                 "total_pixels": total_pixels,
                 "water_pixels": water_pixels,
-                "non_water_pixels": non_water_pixels
+                "non_water_pixels": non_water_pixels,
+                "total_area_km2": total_area_km2
             }
             
         except Exception as e:
@@ -230,7 +243,8 @@ class WaterService:
                 "non_water_percentage": 0.0,
                 "total_pixels": 0,
                 "water_pixels": 0,
-                "non_water_pixels": 0
+                "non_water_pixels": 0,
+                "total_area_km2": 0.0
             }
     
     def _calculate_jrc_official_stats(self, seasonality: ee.Image, max_extent: ee.Image, occurrence: ee.Image, roi: ee.Geometry) -> Dict[str, Any]:
@@ -546,12 +560,13 @@ class WaterService:
             result = {
                 "urlFormat": tile_url,
                 "mapStats": {
-                    "water_percentage": str(water_stats["water_percentage"]),
-                    "non_water_percentage": str(water_stats["non_water_percentage"]),
+                    "water_percentage": water_stats["water_percentage"],
+                    "non_water_percentage": water_stats["non_water_percentage"],
                     "total_pixels": water_stats["total_pixels"],
                     "water_pixels": water_stats["water_pixels"],
                     "non_water_pixels": water_stats["non_water_pixels"],
-                    "threshold_used": threshold
+                    "threshold_used": threshold,
+                    "total_area_km2": water_stats.get("total_area_km2", 0)
                 },
                 "legendConfig": self.LEGEND_CONFIG,
                 "extraDescription": f"Water presence derived from JRC Global Surface Water dataset (threshold: {threshold}% occurrence)."

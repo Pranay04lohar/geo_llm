@@ -37,9 +37,8 @@ import time
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Initialize Earth Engine with user authentication (for token generation)
+# Initialize Earth Engine at module level for thread safety
 try:
-    # Use user authentication (from 'earthengine authenticate') which supports token generation
     project_id = 'gee-tool-469517'
     ee.Initialize(project=project_id)
     logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
@@ -82,7 +81,6 @@ class LSTService:
     
     def __init__(self):
         """Initialize the LST service."""
-        # Earth Engine should be initialized by the main service
         logger.info("✅ LST service initialized")
     
     @staticmethod

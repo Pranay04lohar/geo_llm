@@ -20,9 +20,8 @@ import ee
 
 logger = logging.getLogger(__name__)
 
-# Initialize Earth Engine with user authentication (for token generation)
+# Initialize Earth Engine at module level for thread safety
 try:
-    # Use user authentication (from 'earthengine authenticate') which supports token generation
     project_id = 'gee-tool-469517'
     ee.Initialize(project=project_id)
     logger.info(f"✅ Earth Engine initialized with user auth for project '{project_id}'")
@@ -33,6 +32,10 @@ except Exception as e:
 
 class NDVIService:
     """High-performance NDVI analysis service with time-series capabilities"""
+    
+    def __init__(self):
+        """Initialize the service"""
+        logger.info("✅ NDVI service initialized")
     
     # NDVI value ranges and interpretation
     NDVI_RANGES = {

@@ -4,9 +4,11 @@ Core LLM Agent API - Simple endpoint for GEE and Search services
 
 import logging
 import time
+import json
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -320,6 +322,55 @@ async def health_check() -> HealthResponse:
             services={"core_agent": False, "gee_service": False, "search_service": False},
             timestamp=time.time()
         )
+
+# Request model for COT streaming
+class COTStreamRequest(BaseModel):
+    user_prompt: str = Field(..., description="User's analysis request")
+    roi: Optional[Dict[str, Any]] = Field(None, description="Region of Interest GeoJSON")
+
+@app.post("/cot-stream")
+async def stream_cot_analysis(request: COTStreamRequest):
+    """
+    Stream Chain of Thought analysis step by step with real backend execution
+    
+    This endpoint provides real-time COT where each step is actually executed
+    in the backend before showing the next step to the user.
+    """
+    try:
+        from .simple_step_processor import SimpleStepProcessor
+        
+        processor = SimpleStepProcessor()
+    
+        async def generate_cot_stream():
+            try:
+                async for step in processor.process_analysis_steps(request.roi or {}, request.user_prompt):
+                    yield f"data: {json.dumps(step)}\n\n"
+            except Exception as e:
+                logger.error(f"Error in COT streaming: {e}")
+                error_step = {
+                    "step": "error",
+                    "status": "error", 
+                    "message": f"Streaming failed: {str(e)}",
+                    "progress": 0,
+                    "details": "Check server logs for details"
+                }
+                yield f"data: {json.dumps(error_step)}\n\n"
+        
+        return StreamingResponse(
+            generate_cot_stream(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to start COT streaming: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start COT streaming: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
