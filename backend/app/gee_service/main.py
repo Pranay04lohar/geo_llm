@@ -875,6 +875,65 @@ async def analyze_water_change(request: WaterChangeRequest):
             detail=f"Internal server error: {str(e)}"
         )
 
+@app.post("/water/sample")
+async def sample_water_value(request: LSTSampleRequest):
+    """
+    Sample water classification at a specific point
+    
+    Features:
+    - Point-based water/land classification
+    - JRC Global Surface Water dataset
+    - Confidence scoring based on occurrence percentage
+    - 30m resolution sampling
+    
+    Returns:
+    - Water classification (1=Water, 0=Land)
+    - Confidence score
+    - Occurrence value
+    - Dataset metadata
+    """
+    if not GEE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Earth Engine not available"
+        )
+    
+    if not gee_initialized:
+        raise HTTPException(
+            status_code=503, 
+            detail="GEE client not initialized"
+        )
+    
+    logger.info(f"🌊 Sampling water at point: {request.lng}, {request.lat}")
+    
+    try:
+        # Create water service instance and call the method
+        water_service = WaterService()
+        result = water_service.sample_water_at_point(
+            lng=request.lng,
+            lat=request.lat,
+            scale=request.scale
+        )
+        
+        if not result.get("success", False):
+            raise HTTPException(
+                status_code=404,
+                detail=result.get("error", "Water sampling failed")
+            )
+        
+        logger.info(f"✅ Water sampling completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in water sample endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
 @app.get("/water/quality")
 async def get_water_quality_info():
     """

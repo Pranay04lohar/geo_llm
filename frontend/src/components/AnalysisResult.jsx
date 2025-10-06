@@ -312,6 +312,15 @@ export default function AnalysisResult({ content }) {
             });
         }
 
+        // Hover interactions enabled for LST/NDVI (sampling) and WATER (static info)
+        if (
+          analysisType !== "lst" &&
+          analysisType !== "ndvi" &&
+          analysisType !== "water"
+        ) {
+          return;
+        }
+
         // Hover sampling tooltip for LST
         // Remove any existing tooltip first to prevent duplicates
         const existingTooltip = document.getElementById("lst-hover-tooltip");
@@ -353,44 +362,69 @@ export default function AnalysisResult({ content }) {
 
         const updateTooltipContent = (info) => {
           if (info?.value != null) {
-            const isNDVI = info.isNDVI || analysisType === "ndvi";
-            const label = isNDVI ? "NDVI" : "LST";
-            const unit = isNDVI ? "" : " °C";
+            if (info.isWater) {
+              // Water analysis tooltip
+              let content = `<div style="line-height: 1.6;">
+                <strong>Classification:</strong> ${info.value}`;
 
-            let content = `<div style="line-height: 1.6;">
-              <strong>${label}:</strong> ${info.value.toFixed(
-              isNDVI ? 3 : 1
-            )}${unit}`;
+              if (info.occurrence_value != null) {
+                content += `<br/><strong>Occurrence:</strong> ${info.occurrence_value}%`;
+              }
 
-            if (isNDVI && info.vegetation_type) {
-              content += `<br/><strong>Type:</strong> ${info.vegetation_type}`;
-            }
+              if (info.confidence != null) {
+                content += `<br/><strong>Confidence:</strong> ${(
+                  info.confidence * 100
+                ).toFixed(1)}%`;
+              }
 
-            if (info.fromGrid) {
-              // Show grid cell stats
-              content += `<br/><strong>Min:</strong> ${
-                info.min?.toFixed(isNDVI ? 3 : 1) || "-"
-              }${unit}
-              <br/><strong>Max:</strong> ${
-                info.max?.toFixed(isNDVI ? 3 : 1) || "-"
-              }${unit}
-              <br/><strong>Std Dev:</strong> ${
-                info.std?.toFixed(isNDVI ? 3 : 1) || "-"
-              }${unit}
-              <br/><small style="color: #666;">📍 1km grid cell (instant)</small>`;
-            } else {
-              // Show point sample metadata
               content += `<br/><strong>Dataset:</strong> ${
-                info.dataset || (isNDVI ? "Sentinel-2" : "MODIS")
+                info.dataset || "JRC Global Surface Water"
               }
-              <br/><strong>Date:</strong> ${info.dateRange || "2024"}`;
-              if (info.quality) {
-                content += `<br/><strong>Quality:</strong> ${info.quality}`;
-              }
-            }
+                <br/><strong>Date:</strong> ${info.dateRange || "2024"}
+                <br/><small style="color: #666;">📍 30m pixel classification</small>
+              </div>`;
+              tooltip.innerHTML = content;
+            } else {
+              // LST/NDVI analysis tooltip
+              const isNDVI = info.isNDVI || analysisType === "ndvi";
+              const label = isNDVI ? "NDVI" : "LST";
+              const unit = isNDVI ? "" : " °C";
 
-            content += `</div>`;
-            tooltip.innerHTML = content;
+              let content = `<div style="line-height: 1.6;">
+                <strong>${label}:</strong> ${info.value.toFixed(
+                isNDVI ? 3 : 1
+              )}${unit}`;
+
+              if (isNDVI && info.vegetation_type) {
+                content += `<br/><strong>Type:</strong> ${info.vegetation_type}`;
+              }
+
+              if (info.fromGrid) {
+                // Show grid cell stats
+                content += `<br/><strong>Min:</strong> ${
+                  info.min?.toFixed(isNDVI ? 3 : 1) || "-"
+                }${unit}
+                <br/><strong>Max:</strong> ${
+                  info.max?.toFixed(isNDVI ? 3 : 1) || "-"
+                }${unit}
+                <br/><strong>Std Dev:</strong> ${
+                  info.std?.toFixed(isNDVI ? 3 : 1) || "-"
+                }${unit}
+                <br/><small style="color: #666;">📍 1km grid cell (instant)</small>`;
+              } else {
+                // Show point sample metadata
+                content += `<br/><strong>Dataset:</strong> ${
+                  info.dataset || (isNDVI ? "Sentinel-2" : "MODIS")
+                }
+                <br/><strong>Date:</strong> ${info.dateRange || "2024"}`;
+                if (info.quality) {
+                  content += `<br/><strong>Quality:</strong> ${info.quality}`;
+                }
+              }
+
+              content += `</div>`;
+              tooltip.innerHTML = content;
+            }
           } else if (info === null) {
             tooltip.innerHTML = "<div style='color: #999;'>Outside ROI</div>";
           } else {
@@ -445,7 +479,9 @@ export default function AnalysisResult({ content }) {
             const sampleEndpoint =
               analysisType === "lst"
                 ? "http://localhost:8000/lst/sample"
-                : "http://localhost:8000/ndvi/sample";
+                : analysisType === "ndvi"
+                ? "http://localhost:8000/ndvi/sample"
+                : "http://localhost:8000/water/sample";
 
             console.log(
               `Fetching ${analysisType.toUpperCase()} sample from backend...`
@@ -461,7 +497,12 @@ export default function AnalysisResult({ content }) {
                 lat: lngLat.lat,
                 startDate: "2024-01-01",
                 endDate: "2024-08-31",
-                scale: analysisType === "lst" ? 1000 : 30,
+                scale:
+                  analysisType === "lst"
+                    ? 1000
+                    : analysisType === "water"
+                    ? 30
+                    : 30,
                 ...(analysisType === "ndvi" ? { cloudThreshold: 20 } : {}),
               }),
             });
@@ -480,19 +521,41 @@ export default function AnalysisResult({ content }) {
             console.log("Received sample data:", data);
 
             const isNDVIResp = data && typeof data.value_ndvi === "number";
-            const info = {
-              value: isNDVIResp ? data.value_ndvi : data.value_celsius,
-              dataset: data.dataset,
-              dateRange: data?.date_range
-                ? `${data.date_range.start} → ${data.date_range.end}`
-                : undefined,
-              quality:
-                data?.quality?.score != null
-                  ? `${Math.round(data.quality.score * 100)}%`
+            const isWaterResp =
+              data && typeof data.water_classification !== "undefined";
+
+            let info;
+            if (isWaterResp) {
+              // Water analysis response
+              info = {
+                value:
+                  data.classification_text ||
+                  (data.water_classification === 1 ? "Water" : "Land"),
+                classification: data.water_classification,
+                confidence: data.confidence,
+                occurrence_value: data.occurrence_value,
+                dataset: data.dataset || "JRC Global Surface Water",
+                dateRange: data?.date_range
+                  ? `${data.date_range.start} → ${data.date_range.end}`
+                  : "2024",
+                isWater: true,
+              };
+            } else {
+              // LST/NDVI analysis response
+              info = {
+                value: isNDVIResp ? data.value_ndvi : data.value_celsius,
+                dataset: data.dataset,
+                dateRange: data?.date_range
+                  ? `${data.date_range.start} → ${data.date_range.end}`
                   : undefined,
-              vegetation_type: data.vegetation_type,
-              isNDVI: isNDVIResp,
-            };
+                quality:
+                  data?.quality?.score != null
+                    ? `${Math.round(data.quality.score * 100)}%`
+                    : undefined,
+                vegetation_type: data.vegetation_type,
+                isNDVI: isNDVIResp,
+              };
+            }
             cache.set(key, info);
             currentInfoRef.current = info;
             updateTooltipContent(info);
@@ -579,8 +642,7 @@ export default function AnalysisResult({ content }) {
             return;
           }
 
-          // Sample LST (debounced)
-          // Immediately show sampling state to avoid stale "Outside ROI" while request is in-flight
+          // Sample all analysis types (debounced). Show sampling state immediately
           updateTooltipContent({});
           sampleDebounced(e.lngLat);
         });

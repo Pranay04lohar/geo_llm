@@ -85,11 +85,14 @@ class WaterService:
     def _load_jrc_image(self):
         """Load JRC Global Surface Water image"""
         try:
+            logger.info(f"🔄 Loading JRC dataset: {self.JRC_DATASET}")
             self.jrc_image = ee.Image(self.JRC_DATASET)
             logger.info("✅ JRC Global Surface Water image loaded successfully")
+            return self.jrc_image
         except Exception as e:
             logger.error(f"❌ Failed to load JRC image: {e}")
             self.jrc_image = None
+            return None
     
     def _load_india_boundary(self):
         """Load India boundary for clipping data"""
@@ -884,6 +887,146 @@ class WaterService:
             ]
         }
 
+
+    def sample_water_at_point(self, lng: float, lat: float, scale: int = 30) -> Dict[str, Any]:
+        """
+        Sample water classification at a specific point with robust fallback strategy
+        
+        Args:
+            lng: Longitude
+            lat: Latitude  
+            scale: Sampling scale in meters (default: 30m)
+            
+        Returns:
+            Dictionary with water classification and metadata
+        """
+        try:
+            # Create point geometry
+            point = ee.Geometry.Point([lng, lat])
+            logger.info(f"🌊 Sampling water at point: {lng}, {lat}")
+            
+            # Load JRC image
+            jrc_image = ee.Image(self.JRC_DATASET)
+            
+            # Select bands with their masks
+            occurrence = jrc_image.select('occurrence')
+            max_extent = jrc_image.select('max_extent')
+            
+            # Strategy 1: Direct pixel sample at 30m
+            sample = occurrence.reduceRegion(
+                reducer=ee.Reducer.first(),
+                geometry=point,
+                scale=scale,
+                maxPixels=1e9
+            ).getInfo()
+            
+            occurrence_value = sample.get('occurrence')
+            logger.info(f"📈 30m sample: occurrence={occurrence_value}")
+            
+            # Strategy 2: If None, try buffered mean (60m radius = ~2 pixels)
+            if occurrence_value is None:
+                logger.info("⚠️ No data at point, trying 60m buffer with mean reducer")
+                buffer = point.buffer(60)  # 60m radius
+                
+                buffered_sample = occurrence.reduceRegion(
+                    reducer=ee.Reducer.mean(),
+                    geometry=buffer,
+                    scale=30,
+                    maxPixels=1e9
+                ).getInfo()
+                
+                occurrence_value = buffered_sample.get('occurrence')
+                logger.info(f"📈 60m buffer sample: occurrence={occurrence_value}")
+                scale = 60  # Update to reflect actual sampling method
+            
+            # Strategy 3: If still None, try larger buffer (120m) with max_extent band as fallback
+            if occurrence_value is None:
+                logger.info("⚠️ Still no data, trying 120m buffer + max_extent check")
+                buffer = point.buffer(120)
+                
+                # Try occurrence first
+                buffered_sample = occurrence.reduceRegion(
+                    reducer=ee.Reducer.mean(),
+                    geometry=buffer,
+                    scale=30,
+                    maxPixels=1e9
+                ).getInfo()
+                
+                occurrence_value = buffered_sample.get('occurrence')
+                
+                # If occurrence is still None, check max_extent (binary: was water ever detected?)
+                if occurrence_value is None:
+                    extent_sample = max_extent.reduceRegion(
+                        reducer=ee.Reducer.mean(),
+                        geometry=buffer,
+                        scale=30,
+                        maxPixels=1e9
+                    ).getInfo()
+                    
+                    extent_value = extent_sample.get('max_extent')
+                    logger.info(f"📈 120m buffer max_extent: {extent_value}")
+                    
+                    if extent_value is not None:
+                        # Convert max_extent (0/1) to occurrence-like value
+                        # If extent=1, assume low occurrence (10%); if extent=0, assume 0%
+                        occurrence_value = extent_value * 10 if extent_value > 0 else 0
+                        logger.info(f"📈 Derived occurrence from max_extent: {occurrence_value}")
+                
+                scale = 120  # Update to reflect actual sampling method
+            
+            # Strategy 4: Final fallback - classify as land if no data found
+            if occurrence_value is None:
+                logger.warning(f"❌ No JRC data at {lng}, {lat} even with 120m buffer - assuming land")
+                return {
+                    "success": True,
+                    "water_classification": 0,  # Assume land
+                    "occurrence_value": 0,
+                    "confidence": 0.1,  # Low confidence
+                    "dataset": "JRC Global Surface Water",
+                    "date_range": {
+                        "start": "2000-01-01",
+                        "end": "2021-12-31"
+                    },
+                    "scale_meters": scale,
+                    "threshold_used": 20,
+                    "note": "No JRC data available - assumed land (low confidence)"
+                }
+            
+            # Classify as water (1) or land (0) based on occurrence threshold
+            water_classification = 1 if occurrence_value >= 20 else 0
+            
+            # Calculate confidence based on how definitive the value is
+            # High occurrence (>80%) or very low (<5%) = high confidence
+            # Mid-range (20-80%) = medium confidence
+            if occurrence_value >= 80:
+                confidence = min(occurrence_value / 100.0, 1.0)
+            elif occurrence_value < 5:
+                confidence = min((100 - occurrence_value) / 100.0, 0.95)
+            else:
+                # Mid-range: less confident
+                confidence = 0.6
+            
+            return {
+                "success": True,
+                "water_classification": water_classification,
+                "occurrence_value": round(occurrence_value, 2),
+                "confidence": round(confidence, 2),
+                "dataset": "JRC Global Surface Water",
+                "date_range": {
+                    "start": "2000-01-01",
+                    "end": "2021-12-31"
+                },
+                "scale_meters": scale,
+                "threshold_used": 20,
+                "classification_text": "Water" if water_classification == 1 else "Land"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error sampling water: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     def debug_roi_data(self, roi: Dict[str, Any]) -> Dict[str, Any]:
         """Debug function to check what data exists in the ROI"""
