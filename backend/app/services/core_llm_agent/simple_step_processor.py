@@ -71,8 +71,13 @@ class SimpleStepProcessor:
                 from app.gee_service.services.water_service import WaterService
                 water_service = WaterService()
                 
-                # Call the analysis method directly
-                analysis_data = water_service.analyze_water_presence(roi)
+                # Call the analysis method directly with optimized parameters
+                analysis_data = water_service.analyze_water_presence(
+                    roi,
+                    year=2023,
+                    threshold=20,
+                    include_seasonal=False  # Disable seasonal analysis for faster processing
+                )
                 logger.info("✅ Water analysis completed successfully")
                 
             except Exception as e:
@@ -155,16 +160,30 @@ class SimpleStepProcessor:
                 "status": "processing",
                 "message": "Analyzing land surface temperature using MODIS data...",
                 "progress": 30,
-                "details": "Processing thermal infrared data"
+                "details": "Processing thermal infrared data (this may take 1-2 minutes for satellite data)"
             }
             
             try:
-                # Use the LST service directly instead of HTTP requests
-                from app.gee_service.services.lst_service import LSTService
-                lst_service = LSTService()
+                # Use HTTP for LST (like static COT does) to avoid EE context issues
+                import requests
                 
-                # Call the analysis method directly
-                analysis_data = lst_service.analyze_lst_with_polygon(roi)
+                # Use roi directly as geometry (same as static COT)
+                response = requests.post(
+                    "http://localhost:8000/lst/land-surface-temperature",
+                    json={
+                        "geometry": roi,
+                        "startDate": "2023-06-01",
+                        "endDate": "2023-08-31",
+                        "includeUHI": True,
+                        "includeTimeSeries": False,
+                        "scale": 1000,
+                        "maxPixels": 1e8,
+                        "exactComputation": False
+                    },
+                    timeout=180
+                )
+                response.raise_for_status()
+                analysis_data = response.json()
                 logger.info("✅ LST analysis completed successfully")
                 
             except Exception as e:
@@ -200,8 +219,11 @@ class SimpleStepProcessor:
                 "details": "Interactive thermal map ready",
                 "final_result": {
                     "analysis_type": "lst",
-                    "tile_url": analysis_data.get("visualization", {}).get("tile_url"),
-                    "stats": analysis_data.get("statistics", {}),
+                    "tile_url": analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url"),
+                    "stats": {
+                        **analysis_data.get("mapStats", {}),
+                        "total_area_km2": analysis_data.get("roi_area_km2", 0)
+                    },
                     "roi": {
                         "geometry": {
                             "type": roi.get("type", "Polygon"),
@@ -243,16 +265,30 @@ class SimpleStepProcessor:
                 "status": "processing",
                 "message": "Analyzing vegetation health using Sentinel-2 data...",
                 "progress": 30,
-                "details": "Processing NDVI calculations"
+                "details": "Processing NDVI calculations (this may take 1-2 minutes for satellite data)"
             }
             
             try:
-                # Use the NDVI service directly instead of HTTP requests
-                from app.gee_service.services.ndvi_service import NDVIService
-                ndvi_service = NDVIService()
+                # Use HTTP for NDVI (like static COT does) to avoid EE context issues
+                import requests
                 
-                # Call the analysis method directly
-                analysis_data = ndvi_service.analyze_ndvi_with_polygon(roi)
+                # Use roi directly as geometry (same as static COT)
+                response = requests.post(
+                    "http://localhost:8000/ndvi/vegetation-analysis",
+                    json={
+                        "geometry": roi,
+                        "startDate": "2023-06-01",
+                        "endDate": "2023-08-31",
+                        "cloudThreshold": 30,
+                        "scale": 60,
+                        "maxPixels": 1e9,
+                        "includeTimeSeries": False,
+                        "exactComputation": False
+                    },
+                    timeout=180
+                )
+                response.raise_for_status()
+                analysis_data = response.json()
                 logger.info("✅ NDVI analysis completed successfully")
                 
             except Exception as e:
@@ -288,8 +324,11 @@ class SimpleStepProcessor:
                 "details": "Interactive vegetation map ready",
                 "final_result": {
                     "analysis_type": "ndvi",
-                    "tile_url": analysis_data.get("visualization", {}).get("tile_url"),
-                    "stats": analysis_data.get("statistics", {}),
+                    "tile_url": analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url"),
+                    "stats": {
+                        **analysis_data.get("mapStats", {}).get("ndvi_statistics", {}),
+                        "total_area_km2": analysis_data.get("roi_area_km2", 0)
+                    },
                     "roi": {
                         "geometry": {
                             "type": roi.get("type", "Polygon"),

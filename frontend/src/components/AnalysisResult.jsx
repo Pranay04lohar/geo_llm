@@ -51,6 +51,7 @@ export default function AnalysisResult({ content }) {
   const mapDataMatch = content.match(/\[MAP_DATA:(.*?)\]$/);
   const hasMapData = mapDataMatch !== null;
   const mapData = hasMapData ? JSON.parse(mapDataMatch[1]) : null;
+
   const textContent = hasMapData
     ? content.replace(/\[MAP_DATA:.*?\]$/, "").trim()
     : content;
@@ -361,6 +362,9 @@ export default function AnalysisResult({ content }) {
         const currentInfoRef = { current: null };
 
         const updateTooltipContent = (info) => {
+          console.log("updateTooltipContent called with info:", info);
+          console.log("info?.value:", info?.value);
+          console.log("info?.value != null:", info?.value != null);
           if (info?.value != null) {
             if (info.isWater) {
               // Water analysis tooltip
@@ -486,9 +490,26 @@ export default function AnalysisResult({ content }) {
             console.log(
               `Fetching ${analysisType.toUpperCase()} sample from backend...`
             );
+            console.log("Sample endpoint:", sampleEndpoint);
+            console.log("Sample payload:", {
+              lng: lngLat.lng,
+              lat: lngLat.lat,
+              startDate: "2024-01-01",
+              endDate: "2024-08-31",
+              scale:
+                analysisType === "lst"
+                  ? 1000
+                  : analysisType === "water"
+                  ? 30
+                  : 30,
+              ...(analysisType === "ndvi" ? { cloudThreshold: 20 } : {}),
+            });
             // avoid overlapping hover fetches
             if (sampleDebounced._inFlight) return;
             sampleDebounced._inFlight = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
             const resp = await fetch(sampleEndpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -505,7 +526,10 @@ export default function AnalysisResult({ content }) {
                     : 30,
                 ...(analysisType === "ndvi" ? { cloudThreshold: 20 } : {}),
               }),
+              signal: controller.signal,
             });
+
+            clearTimeout(timeoutId);
 
             console.log("Response status:", resp.status);
             if (!resp.ok) {
@@ -514,6 +538,8 @@ export default function AnalysisResult({ content }) {
                 resp.status,
                 resp.statusText
               );
+              const errorText = await resp.text();
+              console.error("Error response body:", errorText);
               return;
             }
 
@@ -523,6 +549,17 @@ export default function AnalysisResult({ content }) {
             const isNDVIResp = data && typeof data.value_ndvi === "number";
             const isWaterResp =
               data && typeof data.water_classification !== "undefined";
+
+            console.log("Response processing - isNDVIResp:", isNDVIResp);
+            console.log("Response processing - isWaterResp:", isWaterResp);
+            console.log(
+              "Response processing - data.value_ndvi:",
+              data.value_ndvi
+            );
+            console.log(
+              "Response processing - typeof data.value_ndvi:",
+              typeof data.value_ndvi
+            );
 
             let info;
             if (isWaterResp) {
@@ -556,12 +593,18 @@ export default function AnalysisResult({ content }) {
                 isNDVI: isNDVIResp,
               };
             }
+            console.log("Created info object:", info);
+            console.log("info.value:", info.value);
+            console.log("info.isNDVI:", info.isNDVI);
             cache.set(key, info);
             currentInfoRef.current = info;
             updateTooltipContent(info);
             console.log("Tooltip updated with info:", info);
           } catch (e) {
             console.error("Hover sample error:", e);
+            if (e.name === "AbortError") {
+              console.error("Sample request timed out after 10 seconds");
+            }
           } finally {
             sampleDebounced._inFlight = false;
           }

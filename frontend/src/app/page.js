@@ -143,27 +143,241 @@ export default function Home() {
     [earthSpeed]
   );
 
-  // Hardcoded CoT script and final result text
-  const COT_SCRIPT = [
-    "Chain-of-Thought (CoT) Simulation:",
-    "Initializing geospatial reasoning chain...",
-    "",
-    "Step 1: Parsing the uploaded GeoJSON boundary data.",
-    "Step 2: Verifying CRS consistency across datasets.",
-    "Step 3: Preprocessing population dataset – removing invalid features and empty geometries.",
-    "Step 4: Performing spatial join to link population points with administrative boundaries.",
-    "Step 5: Executing clustering algorithm (DBSCAN) to detect population centers.",
-    "Step 6: Visualizing population clusters using color-coded boundaries and heatmaps.",
-    "",
-    "Sample Analytical Thought Process:",
-    "Let us begin by understanding the key geospatial inputs provided by the user. First, the boundary file specifies the coordinates of administrative regions which we need to parse. Next, the population dataset includes spatial coordinates with associated demographic data.",
-    "The next logical step is to preprocess these datasets by ensuring coordinate reference system (CRS) compatibility, removing invalid geometries, and handling missing data.",
-    "Once data is preprocessed, a spatial join operation will associate population data points with their corresponding administrative regions.",
-    "We will then apply clustering algorithms, such as K-Means or DBSCAN, to group spatial points based on density and proximity.",
-    "Finally, after identifying spatial clusters, we will perform statistical summarization of population density, highlight outlier regions, and visualize the clusters on the map.",
-    "",
-    "Generating result output...",
-  ];
+  // Real-time COT state
+  const [cotSteps, setCotSteps] = useState([]);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isCOTProcessing, setIsCOTProcessing] = useState(false);
+
+  // Helper function to extract location from query
+  const extractLocationFromQuery = (query) => {
+    const lowerQuery = query.toLowerCase();
+
+    // Skip common non-location words
+    const skipWords = [
+      "analysis",
+      "water",
+      "lst",
+      "ndvi",
+      "lulc",
+      "temperature",
+      "vegetation",
+      "land",
+      "use",
+      "cover",
+      "coverage",
+      "analyze",
+      "show",
+      "get",
+      "find",
+      "calculate",
+      "compute",
+    ];
+
+    // Enhanced location patterns
+    const locationPatterns = [
+      // "Water analysis of Mumbai" or "LST in New York"
+      /(?:analyze|analysis|water|lst|ndvi|lulc|temperature|vegetation|land|use|cover|coverage)\s+(?:of|in|for|at|around|near)\s+([^,]+(?:,\s*[^,]+)*)/i,
+
+      // "in Mumbai" or "at London"
+      /(?:in|at|for|around|near)\s+([^,]+(?:,\s*[^,]+)*)/i,
+
+      // "Mumbai water analysis" or "New York LST"
+      /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:water|lst|ndvi|lulc|analysis|temperature|vegetation)/i,
+
+      // "Show me water in Mumbai" or "Get LST for London"
+      /(?:show|get|find|calculate|compute)\s+(?:me\s+)?(?:water|lst|ndvi|lulc|analysis|temperature|vegetation)\s+(?:in|for|at|around|near)\s+([^,]+(?:,\s*[^,]+)*)/i,
+
+      // Direct location names (last resort)
+      /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/g,
+    ];
+
+    for (const pattern of locationPatterns) {
+      const match = lowerQuery.match(pattern);
+      if (match && match[1]) {
+        const location = match[1].trim();
+
+        // Clean up the location
+        let cleanLocation = location
+          .replace(/\s+/g, " ") // Multiple spaces to single
+          .replace(/[^\w\s,.-]/g, "") // Remove special chars except basic punctuation
+          .trim();
+
+        // Skip if it's just common words
+        const words = cleanLocation.toLowerCase().split(/\s+/);
+        if (
+          words.every((word) => skipWords.includes(word) || word.length < 2)
+        ) {
+          continue;
+        }
+
+        // Skip if it's too short or too long
+        if (cleanLocation.length < 2 || cleanLocation.length > 100) {
+          continue;
+        }
+
+        console.log(
+          `🎯 Extracted location: "${cleanLocation}" from query: "${query}"`
+        );
+        return cleanLocation;
+      }
+    }
+
+    console.log(`❌ No location found in query: "${query}"`);
+    return null;
+  };
+
+  // Helper function to get ROI for any location using geocoding
+  const getROIForLocation = async (location) => {
+    try {
+      console.log(`🔍 Looking up coordinates for: ${location}`);
+
+      // Use Nominatim (OpenStreetMap) geocoding API for any location worldwide
+      const geocodingUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+        location
+      )}&limit=1&addressdetails=1`;
+
+      const response = await fetch(geocodingUrl, {
+        headers: {
+          "User-Agent": "GeoLLM/1.0", // Required by Nominatim
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Geocoding failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data || data.length === 0) {
+        throw new Error(`Location not found: ${location}`);
+      }
+
+      const result = data[0];
+      const lat = parseFloat(result.lat);
+      const lng = parseFloat(result.lon); // Nominatim returns 'lon', not 'lng'
+      const displayName = result.display_name || location;
+
+      console.log(`📍 Found coordinates: ${lat}, ${lng} for ${displayName}`);
+
+      // Determine appropriate bounds based on location type and importance
+      let bounds = 0.1; // Default 0.1 degrees (~11km)
+
+      // Adjust bounds based on location type
+      if (result.type === "city" || result.type === "town") {
+        bounds = 0.15; // ~17km for cities
+      } else if (result.type === "state" || result.type === "administrative") {
+        bounds = 0.5; // ~55km for states
+      } else if (result.type === "country") {
+        bounds = 2.0; // ~220km for countries
+      } else if (result.type === "village" || result.type === "hamlet") {
+        bounds = 0.05; // ~5.5km for villages
+      }
+
+      // Special handling for major cities (larger bounds)
+      const majorCities = [
+        "mumbai",
+        "delhi",
+        "bangalore",
+        "kolkata",
+        "chennai",
+        "hyderabad",
+        "pune",
+        "ahmedabad",
+        "jaipur",
+        "london",
+        "new york",
+        "tokyo",
+        "paris",
+        "berlin",
+        "moscow",
+        "beijing",
+        "shanghai",
+        "sydney",
+        "melbourne",
+        "toronto",
+        "vancouver",
+        "mexico city",
+        "sao paulo",
+        "buenos aires",
+        "cairo",
+        "lagos",
+        "nairobi",
+        "johannesburg",
+        "cape town",
+      ];
+
+      if (
+        majorCities.some((city) => displayName.toLowerCase().includes(city))
+      ) {
+        bounds = Math.max(bounds, 0.2); // At least 22km for major cities
+      }
+
+      // Create a rectangular ROI in the format expected by backend
+      const roi = {
+        type: "Polygon",
+        coordinates: [
+          [
+            [lng - bounds, lat - bounds],
+            [lng + bounds, lat - bounds],
+            [lng + bounds, lat + bounds],
+            [lng - bounds, lat + bounds],
+            [lng - bounds, lat - bounds],
+          ],
+        ],
+        display_name: displayName,
+        center: [lng, lat],
+        bounds: bounds,
+      };
+
+      console.log(`✅ Created ROI for ${displayName} with bounds: ${bounds}°`);
+      return roi;
+    } catch (error) {
+      console.error("Error geocoding location:", error);
+
+      // Fallback: Try to extract coordinates if location contains lat,lng
+      const coordMatch = location.match(/(\d+\.?\d*),\s*(\d+\.?\d*)/);
+      if (coordMatch) {
+        const lat = parseFloat(coordMatch[1]);
+        const lng = parseFloat(coordMatch[2]);
+
+        console.log(`📍 Using provided coordinates: ${lat}, ${lng}`);
+
+        return {
+          type: "Polygon",
+          coordinates: [
+            [
+              [lng - 0.1, lat - 0.1],
+              [lng + 0.1, lat - 0.1],
+              [lng + 0.1, lat + 0.1],
+              [lng - 0.1, lat + 0.1],
+              [lng - 0.1, lat - 0.1],
+            ],
+          ],
+          display_name: `Location (${lat}, ${lng})`,
+          center: [lng, lat],
+          bounds: 0.1,
+        };
+      }
+
+      // Final fallback: Use Mumbai coordinates
+      console.log("⚠️ Using fallback Mumbai coordinates");
+      return {
+        type: "Polygon",
+        coordinates: [
+          [
+            [72.7777, 18.976],
+            [72.9777, 18.976],
+            [72.9777, 19.176],
+            [72.7777, 19.176],
+            [72.7777, 18.976],
+          ],
+        ],
+        display_name: "Mumbai, India (Fallback)",
+        center: [72.8777, 19.076],
+        bounds: 0.1,
+      };
+    }
+  };
 
   // Handle file upload for RAG
   const handleFileUpload = async (files) => {
@@ -206,6 +420,333 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Real-time COT streaming handler
+  const handleCOTStream = async (userPrompt, roi) => {
+    setIsCOTProcessing(true);
+    setCotSteps([]);
+    setCurrentStep(0);
+
+    // Add initial COT message
+    const cotMessageId = Date.now();
+    setMessages((prev) => [
+      ...prev,
+      { type: "cot", content: "", id: cotMessageId, steps: [] },
+    ]);
+
+    // Set a timeout to prevent infinite processing
+    const timeoutId = setTimeout(() => {
+      console.warn("COT streaming timeout - stopping process");
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === cotMessageId
+            ? {
+                type: "assistant",
+                content: `⏰ Analysis timed out after 3 minutes.\n\nGeospatial analysis can take time due to satellite data processing. Please try again or use a smaller area.`,
+              }
+            : msg
+        )
+      );
+      setIsCOTProcessing(false);
+    }, 180000); // 3 minute timeout for geospatial analysis
+
+    try {
+      const response = await fetch("http://localhost:8003/cot-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_prompt: userPrompt,
+          roi: roi || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const stepData = JSON.parse(line.slice(6));
+              console.log("📊 Received step data:", stepData);
+
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === cotMessageId
+                    ? {
+                        ...msg,
+                        content: generateCOTContent(stepData),
+                        steps: [...(msg.steps || []), stepData],
+                      }
+                    : msg
+                )
+              );
+
+              setCurrentStep(stepData.step);
+              setCotSteps((prev) => [...prev, stepData]);
+
+              // Check if this step has an error status
+              if (stepData.status === "error") {
+                console.error("COT step failed:", stepData.message);
+                clearTimeout(timeoutId); // Clear the timeout
+                // Stop processing and show error
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === cotMessageId
+                      ? {
+                          type: "assistant",
+                          content: `❌ Analysis failed: ${stepData.message}\n\nPlease try again with a different query.`,
+                        }
+                      : msg
+                  )
+                );
+                // Force reset all processing states
+                setIsCOTProcessing(false);
+                setCurrentStep(0);
+                setCotSteps([]);
+                return; // Exit the streaming loop
+              }
+
+              // If this is the final step, replace COT with result
+              if (stepData.final_result) {
+                setTimeout(() => {
+                  const formattedResult = formatFinalResult(
+                    stepData.final_result
+                  );
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === cotMessageId
+                        ? {
+                            type: "assistant",
+                            content: formattedResult,
+                          }
+                        : msg
+                    )
+                  );
+                }, 2000); // Wait 2 seconds before showing final result
+              }
+            } catch (parseError) {
+              console.error("Error parsing COT step:", parseError);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("COT streaming failed:", error);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === cotMessageId
+            ? {
+                type: "assistant",
+                content: `❌ Real-time analysis failed: ${error.message}`,
+              }
+            : msg
+        )
+      );
+    } finally {
+      clearTimeout(timeoutId); // Clear the timeout
+      setIsCOTProcessing(false);
+      // Force reset any other processing states
+      setCurrentStep(0);
+      setCotSteps([]);
+    }
+  };
+
+  // Generate COT content from step data
+  const generateCOTContent = (stepData) => {
+    const { step, status, message, progress, details } = stepData;
+
+    let content = "🔍 Real-time Chain-of-Thought Analysis:\n";
+    content += "Executing geospatial analysis step by step...\n\n";
+
+    // Add completed steps
+    for (let i = 1; i < step; i++) {
+      content += `✅ Step ${i}: [Completed]\n`;
+    }
+
+    // Add current step
+    const statusIcon =
+      status === "completed"
+        ? "✅"
+        : status === "processing"
+        ? "🔄"
+        : status === "error"
+        ? "❌"
+        : "⏳";
+    content += `${statusIcon} Step ${step}: ${message}\n`;
+
+    if (details) {
+      content += `   └─ ${details}\n`;
+    }
+
+    // Add progress bar
+    if (progress !== undefined) {
+      const progressBar =
+        "█".repeat(Math.floor(progress / 5)) +
+        "░".repeat(20 - Math.floor(progress / 5));
+      content += `\n📊 Progress: [${progressBar}] ${progress}%\n`;
+    }
+
+    return content;
+  };
+
+  // Format final result with AI analysis
+  const formatFinalResult = (finalResult) => {
+    const { analysis_type, tile_url, stats, roi, service_used } = finalResult;
+
+    // Generate AI analysis text based on the results
+    let aiAnalysis = generateAIAnalysis(analysis_type, stats, roi);
+
+    // Add the map data block
+    aiAnalysis += `\n\n[MAP_DATA:${JSON.stringify({
+      tile_url: tile_url,
+      analysis_type: analysis_type,
+      roi: roi, // roi already has the correct structure from backend
+      service_used: service_used,
+      stats: stats,
+    })}]`;
+
+    return aiAnalysis;
+  };
+
+  // Generate AI analysis text
+  const generateAIAnalysis = (analysisType, stats, roi) => {
+    const location = roi.display_name || "the specified region";
+    const area = stats.total_area_km2 || 0;
+
+    if (analysisType === "water") {
+      const waterPct = stats.water_percentage || 0;
+      const landPct = stats.non_water_percentage || 0;
+
+      let analysis = `✅ Water Coverage Analysis Complete!\n\n`;
+
+      if (waterPct > 20) {
+        analysis += `🌊 **Significant Water Presence Detected**\n\n`;
+        analysis += `The analysis reveals substantial water coverage in ${location}, with ${waterPct.toFixed(
+          1
+        )}% of the area classified as water bodies. This indicates a region rich in aquatic resources, including rivers, lakes, reservoirs, or coastal areas.\n\n`;
+      } else if (waterPct > 5) {
+        analysis += `💧 **Moderate Water Coverage**\n\n`;
+        analysis += `${location} shows moderate water presence at ${waterPct.toFixed(
+          1
+        )}%, suggesting a balanced mix of water bodies and terrestrial features. This could include smaller rivers, ponds, or seasonal water features.\n\n`;
+      } else {
+        analysis += `🏞️ **Primarily Terrestrial Region**\n\n`;
+        analysis += `The analysis indicates that ${location} is predominantly a land-based region with only ${waterPct.toFixed(
+          1
+        )}% water coverage. This suggests an urban, agricultural, or forested landscape with minimal water bodies.\n\n`;
+      }
+
+      analysis += `**Key Statistics:**\n`;
+      analysis += `• Water Coverage: ${waterPct.toFixed(1)}%\n`;
+      analysis += `• Land Coverage: ${landPct.toFixed(1)}%\n`;
+      analysis += `• Total Area: ${area.toFixed(1)} km²\n\n`;
+
+      analysis += `**Dataset:** JRC Global Surface Water (2000-2021)\n`;
+      analysis += `**Resolution:** 30 meters\n`;
+      analysis += `**Methodology:** Pixel-level classification using occurrence threshold of 20%\n\n`;
+
+      analysis += `The interactive map below shows the water/land classification with detailed sampling available on hover.`;
+
+      return analysis;
+    } else if (analysisType === "lst") {
+      const lstStats = stats.lst_statistics || {};
+      const meanTemp = lstStats.LST_mean || 0;
+      const minTemp = lstStats.LST_min || 0;
+      const maxTemp = lstStats.LST_max || 0;
+
+      let analysis = `✅ Land Surface Temperature Analysis Complete!\n\n`;
+
+      if (meanTemp > 35) {
+        analysis += `🔥 **High Temperature Region**\n\n`;
+        analysis += `${location} exhibits high land surface temperatures with an average of ${meanTemp.toFixed(
+          1
+        )}°C. This suggests urban heat island effects, arid conditions, or industrial activity.\n\n`;
+      } else if (meanTemp > 25) {
+        analysis += `🌡️ **Moderate Temperature Zone**\n\n`;
+        analysis += `The region shows moderate thermal conditions with a mean temperature of ${meanTemp.toFixed(
+          1
+        )}°C, typical of temperate climates or mixed land use areas.\n\n`;
+      } else {
+        analysis += `❄️ **Cool Temperature Region**\n\n`;
+        analysis += `${location} displays relatively cool surface temperatures averaging ${meanTemp.toFixed(
+          1
+        )}°C, possibly indicating forested areas, water bodies, or high elevation.\n\n`;
+      }
+
+      analysis += `**Temperature Statistics:**\n`;
+      analysis += `• Mean Temperature: ${meanTemp.toFixed(1)}°C\n`;
+      analysis += `• Temperature Range: ${minTemp.toFixed(
+        1
+      )}°C to ${maxTemp.toFixed(1)}°C\n`;
+      analysis += `• Total Area: ${area.toFixed(1)} km²\n\n`;
+
+      analysis += `**Dataset:** MODIS Land Surface Temperature\n`;
+      analysis += `**Resolution:** 1 km\n`;
+      analysis += `**Time Period:** 2024\n\n`;
+
+      analysis += `The thermal visualization below shows temperature distribution with interactive sampling available.`;
+
+      return analysis;
+    } else if (analysisType === "ndvi") {
+      const ndviStats = stats.ndvi_statistics || stats;
+      const meanNDVI = ndviStats.mean || 0;
+      const vegType = stats.dominant_vegetation_type || "Unknown";
+
+      let analysis = `✅ Vegetation Analysis Complete!\n\n`;
+
+      if (meanNDVI > 0.6) {
+        analysis += `🌿 **Dense Vegetation**\n\n`;
+        analysis += `${location} shows excellent vegetation health with an NDVI of ${meanNDVI.toFixed(
+          3
+        )}, indicating dense forests, healthy crops, or well-maintained green spaces.\n\n`;
+      } else if (meanNDVI > 0.3) {
+        analysis += `🌱 **Moderate Vegetation**\n\n`;
+        analysis += `The region displays moderate vegetation cover (NDVI: ${meanNDVI.toFixed(
+          3
+        )}), typical of grasslands, agricultural areas, or mixed land use.\n\n`;
+      } else if (meanNDVI > 0.1) {
+        analysis += `🌾 **Sparse Vegetation**\n\n`;
+        analysis += `${location} has limited vegetation (NDVI: ${meanNDVI.toFixed(
+          3
+        )}), suggesting arid conditions, urban areas, or recently harvested fields.\n\n`;
+      } else {
+        analysis += `🏜️ **Minimal Vegetation**\n\n`;
+        analysis += `The area shows very low vegetation index (NDVI: ${meanNDVI.toFixed(
+          3
+        )}), indicating water bodies, urban areas, or barren land.\n\n`;
+      }
+
+      analysis += `**Vegetation Statistics:**\n`;
+      analysis += `• Mean NDVI: ${meanNDVI.toFixed(3)}\n`;
+      analysis += `• Dominant Type: ${vegType}\n`;
+      analysis += `• NDVI Range: ${ndviStats.min?.toFixed(3) || 0} to ${
+        ndviStats.max?.toFixed(3) || 0
+      }\n`;
+      analysis += `• Total Area: ${area.toFixed(1)} km²\n\n`;
+
+      analysis += `**Dataset:** Sentinel-2\n`;
+      analysis += `**Resolution:** 30 meters\n`;
+      analysis += `**Time Period:** 2024\n\n`;
+
+      analysis += `The vegetation map below shows health distribution with detailed classification on hover.`;
+
+      return analysis;
+    }
+
+    // Default fallback
+    return `✅ ${analysisType.toUpperCase()} Analysis Complete!\n\nAnalysis results are ready for visualization.`;
   };
 
   // Cleanup timers on unmount
@@ -579,11 +1120,31 @@ export default function Home() {
                       >
                         {message.type === "cot" ? (
                           <div className="flex flex-col gap-2">
-                            <div className="flex items-center gap-2">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
-                              <span className="text-sm font-medium">
-                                Thinking...
-                              </span>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+                                <span className="text-sm font-medium">
+                                  Thinking...
+                                </span>
+                              </div>
+                              {isCOTProcessing && (
+                                <button
+                                  onClick={() => {
+                                    setIsCOTProcessing(false);
+                                    setMessages((prev) => [
+                                      ...prev,
+                                      {
+                                        type: "assistant",
+                                        content:
+                                          "🛑 Analysis stopped by user.\n\nYou can now start a new analysis.",
+                                      },
+                                    ]);
+                                  }}
+                                  className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded-md transition-colors"
+                                >
+                                  Stop Analysis
+                                </button>
+                              )}
                             </div>
                             <div className="text-sm whitespace-pre-wrap">
                               {message.content}
@@ -615,7 +1176,7 @@ export default function Home() {
                       aria-label="Prompt input"
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
-                      disabled={isProcessing}
+                      disabled={isProcessing || isCOTProcessing}
                       className="prompt-input w-full bg-black/50 rounded-3xl px-8 py-5 pr-28 text-white placeholder-white/60 focus:outline-none focus:bg-black/60 focus:shadow-xl resize-none shadow-xl transition-all duration-200 border border-white/10 focus:border-white/20 text-base"
                       rows={3}
                     />
@@ -763,9 +1324,12 @@ export default function Home() {
                       <button
                         className="send-button bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl p-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 disabled:opacity-60"
                         aria-label="Send prompt"
-                        disabled={isProcessing || !prompt.trim()}
+                        disabled={
+                          isProcessing || isCOTProcessing || !prompt.trim()
+                        }
                         onClick={async () => {
-                          if (!prompt.trim()) return;
+                          if (!prompt.trim() || isProcessing || isCOTProcessing)
+                            return;
 
                           const userPrompt = prompt.trim();
                           setPrompt("");
@@ -779,16 +1343,39 @@ export default function Home() {
                           setIsProcessing(true);
                           setEarthSpeed(0.0005);
 
-                          // Add CoT message placeholder
+                          // Use real-time COT for geospatial analysis
+                          if (!ragSessionId) {
+                            // For geospatial queries, use real-time COT
+                            // First try to get location from the query or use a default
+                            const location =
+                              extractLocationFromQuery(userPrompt) ||
+                              "Mumbai, India";
+                            const roi = await getROIForLocation(location);
+                            await handleCOTStream(userPrompt, roi);
+                            return;
+                          }
+
+                          // For RAG queries, use static COT
                           const cotMessageId = Date.now();
                           setMessages((prev) => [
                             ...prev,
                             { type: "cot", content: "", id: cotMessageId },
                           ]);
 
-                          // progressively reveal CoT lines
+                          // progressively reveal CoT lines for RAG
                           let cotContent = "";
-                          COT_SCRIPT.forEach((line, idx) => {
+                          const RAG_COT_SCRIPT = [
+                            "Chain-of-Thought (CoT) Analysis:",
+                            "Processing document-based query...",
+                            "",
+                            "Step 1: Analyzing uploaded documents and extracting relevant information.",
+                            "Step 2: Searching through document content for relevant passages.",
+                            "Step 3: Generating contextual response based on document content.",
+                            "",
+                            "Generating response...",
+                          ];
+
+                          RAG_COT_SCRIPT.forEach((line, idx) => {
                             const id = setTimeout(() => {
                               cotContent += line + "\n";
                               setMessages((prev) =>
@@ -818,42 +1405,8 @@ export default function Home() {
                                 ragResponse?.answer || "No answer received";
                               console.log("RAG response:", ragResponse);
                             } else {
-                              // Use Core Agent for GEE/Search queries
-                              const coreResponse = await askCoreAgent(
-                                userPrompt
-                              );
-                              responseText =
-                                coreResponse?.analysis ||
-                                "No analysis received";
-                              console.log("Core Agent response:", coreResponse);
-
-                              // Extract map visualization data if available
-                              // Always build map data from analysis_data, even on errors
-                              if (coreResponse?.analysis_data) {
-                                const ad = coreResponse.analysis_data;
-                                const mapData = {
-                                  tile_url: ad.tile_url || null,
-                                  analysis_type: ad.analysis_type,
-                                  roi: coreResponse.roi,
-                                  service_used: coreResponse.service_used,
-                                  error: ad.error,
-                                  limit_exceeded: ad.limit_exceeded,
-                                  area_km2: ad.area_km2,
-                                  limit_km2: ad.limit_km2,
-                                };
-                                console.log("Map data extracted:", mapData);
-
-                                // Prepend visible error text if present
-                                if (ad.error) {
-                                  responseText =
-                                    `❌ ${ad.error}\n\n` + responseText;
-                                }
-
-                                // Attach map data block so AnalysisResult can render banners/tooltips
-                                responseText += `\n\n[MAP_DATA:${JSON.stringify(
-                                  mapData
-                                )}]`;
-                              }
+                              // This should not happen due to early return above
+                              responseText = "No analysis received";
                             }
 
                             // Replace CoT placeholder with response
@@ -882,11 +1435,10 @@ export default function Home() {
                                 "🌐 Network error. Please check your connection and try again.";
                             } else if (e.message.includes("timeout")) {
                               errorMessage =
-                                "⏱️ Request timed out. Please try with a shorter query.";
-                            } else {
-                              errorMessage = `❌ Error: ${e.message}`;
+                                "⏰ Request timed out. The server might be busy. Please try again.";
                             }
 
+                            // Replace CoT placeholder with error
                             setMessages((prev) =>
                               prev.map((msg) =>
                                 msg.id === cotMessageId
@@ -894,10 +1446,9 @@ export default function Home() {
                                   : msg
                               )
                             );
+                          } finally {
+                            setIsProcessing(false);
                           }
-
-                          setIsProcessing(false);
-                          setEarthSpeed(0.002);
                         }}
                       >
                         <svg
