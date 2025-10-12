@@ -840,6 +840,94 @@ export default function Home() {
     return `✅ ${analysisType.toUpperCase()} Analysis Complete!\n\nAnalysis results are ready for visualization.`;
   };
 
+  // Handle form submission
+  const handleSubmit = async (e) => {
+    if (!prompt.trim() || isProcessing || isCOTProcessing) return;
+
+    const userPrompt = prompt.trim();
+    setPrompt("");
+
+    // Add user message immediately
+    setMessages((prev) => [...prev, { type: "user", content: userPrompt }]);
+
+    setIsProcessing(true);
+    setEarthSpeed(0.0005);
+
+    // Use real-time COT for geospatial analysis
+    if (!ragSessionId) {
+      // For geospatial queries, use real-time COT
+      try {
+        // First try to get location from the query or use a default
+        const location =
+          extractLocationFromQuery(userPrompt) || "Mumbai, India";
+        const roi = await getROIForLocation(location);
+        await handleCOTStream(userPrompt, roi);
+      } finally {
+        // Always reset processing state
+        setIsProcessing(false);
+        setEarthSpeed(0.002);
+      }
+      return;
+    }
+
+    // For RAG queries, use static COT
+    const cotMessageId = Date.now();
+    setMessages((prev) => [
+      ...prev,
+      { type: "cot", content: "", id: cotMessageId },
+    ]);
+
+    // progressively reveal CoT lines for RAG
+    let cotContent = "";
+    const RAG_COT_SCRIPT = [
+      "Chain-of-Thought (CoT) Analysis:",
+      "Processing document-based query...",
+      "",
+      "Step 1: Analyzing uploaded documents and extracting relevant information.",
+      "Step 2: Searching through document content for relevant passages.",
+      "Step 3: Generating contextual response based on document content.",
+      "",
+      "Generating response...",
+    ];
+
+    for (let i = 0; i < RAG_COT_SCRIPT.length; i++) {
+      const line = RAG_COT_SCRIPT[i];
+      cotContent += (i > 0 ? "\n" : "") + line;
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === cotMessageId ? { ...msg, content: cotContent } : msg
+        )
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    try {
+      const ragResponse = await handleRagQuery(userPrompt);
+      if (ragResponse) {
+        setMessages((prev) => [
+          ...prev,
+          { type: "assistant", content: ragResponse },
+        ]);
+        console.log("RAG response:", ragResponse);
+      } else {
+        // This should not happen due to early return above
+        responseText = "No analysis received";
+      }
+    } catch (error) {
+      console.error("RAG query error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "assistant",
+          content: "Sorry, I encountered an error processing your query.",
+        },
+      ]);
+    } finally {
+      setIsProcessing(false);
+      setEarthSpeed(0.002);
+    }
+  };
+
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
@@ -1177,18 +1265,30 @@ export default function Home() {
             </div>
 
             {/* Chat Input Area */}
-            <div className="pl-12 pr-4 -mt-8 pb-2">
+            <div className="-ml-3 -mt-8 pb-2">
               <div className="flex justify-center">
                 <div className="w-full max-w-6xl">
-                  <div className="relative">
+                  <div className="relative bg-black/70 rounded-3xl p-4 shadow-xl backdrop-blur-md border border-gray-800/60">
                     <textarea
                       id="prompt-input"
                       placeholder="Ask anything about geography, boundaries, or spatial data..."
                       aria-label="Prompt input"
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          if (
+                            !isProcessing &&
+                            !isCOTProcessing &&
+                            prompt.trim()
+                          ) {
+                            handleSubmit(e);
+                          }
+                        }
+                      }}
                       disabled={isProcessing || isCOTProcessing}
-                      className="prompt-input w-full bg-black/50 rounded-3xl px-8 py-5 pr-28 text-white placeholder-white/60 focus:outline-none focus:bg-black/60 focus:shadow-xl resize-none shadow-xl transition-all duration-200 border border-white/10 focus:border-white/20 text-base"
+                      className="w-full bg-gray-900/90 rounded-2xl px-8 py-5 pr-28 text-white placeholder-gray-400 focus:outline-none focus:bg-gray-900/95 focus:shadow-xl resize-none transition-all duration-200 border border-gray-600/70 focus:border-cyan-400 text-base backdrop-blur-sm"
                       rows={3}
                     />
                     <div className="absolute right-6 bottom-6 flex items-center gap-4">

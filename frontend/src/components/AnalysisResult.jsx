@@ -729,18 +729,19 @@ export default function AnalysisResult({ content }) {
       // Grid loading happens asynchronously and won't block hover
       // ==================================================================
       const roiGeometryForGrid = mapData.roi?.geometry || mapData.roi;
+      const analysisTypeForGrid = mapData.analysis_type?.toLowerCase();
 
       if (
-        (analysisType === "lst" || analysisType === "ndvi") &&
+        (analysisTypeForGrid === "lst" || analysisTypeForGrid === "ndvi") &&
         roiGeometryForGrid
       ) {
         const gridEndpoint =
-          analysisType === "lst"
+          analysisTypeForGrid === "lst"
             ? "http://localhost:8000/lst/grid"
             : "http://localhost:8000/ndvi/grid";
 
         console.log(
-          `🔷 Loading ${analysisType.toUpperCase()} vector grid for fast hover (with 15s timeout)...`
+          `🔷 Loading ${analysisTypeForGrid.toUpperCase()} vector grid for fast hover (with 15s timeout)...`
         );
         setGridLoaded(false);
 
@@ -779,7 +780,7 @@ export default function AnalysisResult({ content }) {
                 });
 
                 // Only render the colored grid fill for NDVI; for LST keep the grid hidden (used just for sampling)
-                if (analysisType === "ndvi") {
+                if (analysisTypeForGrid === "ndvi") {
                   const fillPaint = {
                     "fill-color": [
                       "interpolate",
@@ -817,7 +818,7 @@ export default function AnalysisResult({ content }) {
                   paint: {
                     "line-color": "#888",
                     "line-width": 0.5,
-                    "line-opacity": analysisType === "ndvi" ? 0.4 : 0.0,
+                    "line-opacity": analysisTypeForGrid === "ndvi" ? 0.4 : 0.0,
                   },
                 });
               }
