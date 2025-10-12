@@ -110,15 +110,18 @@ class SimpleStepProcessor:
             # Step 5: Complete
             logger.info(f"🎯 Preparing final result with analysis_data keys: {list(analysis_data.keys()) if analysis_data else 'None'}")
             
-            # Build final result - pass ROI as-is without reformatting
+            # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
+            simplified_roi = self._simplify_roi_for_streaming(roi)
+            
+            # Build final result - use simplified ROI for streaming
             final_result = {
                 "analysis_type": "water",
                 "tile_url": analysis_data.get("urlFormat"),
                 "stats": analysis_data.get("mapStats"),
-                "roi": roi,  # Pass ROI directly without restructuring
+                "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
                 "service_used": "GEE"
             }
-            logger.info(f"🎯 Final result created with ROI")
+            logger.info(f"🎯 Final result created with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
             
             yield {
                 "step": 5,
@@ -212,6 +215,10 @@ class SimpleStepProcessor:
             await asyncio.sleep(1)
             
             # Step 5: Complete
+            # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
+            simplified_roi = self._simplify_roi_for_streaming(roi)
+            logger.info(f"🎯 LST final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            
             yield {
                 "step": 5,
                 "status": "completed",
@@ -225,7 +232,7 @@ class SimpleStepProcessor:
                         **analysis_data.get("mapStats", {}),
                         "total_area_km2": analysis_data.get("roi_area_km2", 0)
                     },
-                    "roi": roi,  # Pass ROI directly without restructuring
+                    "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
                     "service_used": "GEE"
                 }
             }
@@ -313,6 +320,10 @@ class SimpleStepProcessor:
             await asyncio.sleep(1)
             
             # Step 5: Complete
+            # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
+            simplified_roi = self._simplify_roi_for_streaming(roi)
+            logger.info(f"🎯 NDVI final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            
             yield {
                 "step": 5,
                 "status": "completed",
@@ -326,7 +337,7 @@ class SimpleStepProcessor:
                         **analysis_data.get("mapStats", {}).get("ndvi_statistics", {}),
                         "total_area_km2": analysis_data.get("roi_area_km2", 0)
                     },
-                    "roi": roi,  # Pass ROI directly without restructuring
+                    "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
                     "service_used": "GEE"
                 }
             }
@@ -340,3 +351,106 @@ class SimpleStepProcessor:
                 "progress": 0,
                 "details": "Check server logs for details"
             }
+    
+    def _simplify_roi_for_streaming(self, roi: dict) -> dict:
+        """
+        Simplify ROI polygon to reduce JSON size for streaming while preserving accuracy.
+        Uses adaptive simplification with max 1000 points (good balance of accuracy vs speed).
+        For polygons with angular/important features, preserves key vertices.
+        """
+        if not roi or not isinstance(roi, dict):
+            return roi
+        
+        roi_type = roi.get('type')
+        coordinates = roi.get('coordinates')
+        
+        if roi_type != 'Polygon' or not coordinates or not coordinates[0]:
+            return roi
+        
+        outer_ring = coordinates[0]
+        num_points = len(outer_ring)
+        
+        # More generous limit: 1000 points is still fast (~55KB JSON vs 150KB original)
+        MAX_POINTS = 1000
+        
+        # If already small enough, return as-is
+        if num_points <= MAX_POINTS:
+            logger.info(f"ROI already optimal: {num_points} points (≤{MAX_POINTS})")
+            return roi
+        
+        # Use improved simplification that preserves shape better
+        simplified_ring = self._adaptive_simplify_polygon(outer_ring, MAX_POINTS)
+        
+        logger.info(f"Simplified ROI: {num_points} → {len(simplified_ring)} points (preserved {len(simplified_ring)/num_points*100:.1f}% of detail)")
+        
+        return {
+            'type': 'Polygon',
+            'coordinates': [simplified_ring],
+            'display_name': roi.get('display_name'),
+            'center': roi.get('center')
+        }
+    
+    def _adaptive_simplify_polygon(self, ring: list, max_points: int) -> list:
+        """
+        Adaptively simplify polygon by preserving vertices with significant angular changes.
+        This preserves important features like corners, bays, and peninsulas.
+        """
+        if len(ring) <= max_points:
+            return ring
+        
+        # Calculate angular change at each vertex
+        angles = []
+        for i in range(1, len(ring) - 1):
+            prev = ring[i - 1]
+            curr = ring[i]
+            next_pt = ring[i + 1]
+            
+            # Calculate angle using vectors
+            v1 = [curr[0] - prev[0], curr[1] - prev[1]]
+            v2 = [next_pt[0] - curr[0], next_pt[1] - curr[1]]
+            
+            # Dot product and magnitudes
+            dot = v1[0] * v2[0] + v1[1] * v2[1]
+            mag1 = (v1[0]**2 + v1[1]**2)**0.5
+            mag2 = (v2[0]**2 + v2[1]**2)**0.5
+            
+            # Avoid division by zero
+            if mag1 > 0 and mag2 > 0:
+                # Angular change (higher = more important vertex)
+                cos_angle = dot / (mag1 * mag2)
+                cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
+                angle_importance = abs(1 - cos_angle)  # 0 = straight line, 2 = sharp turn
+            else:
+                angle_importance = 0
+            
+            angles.append((i, angle_importance))
+        
+        # Always keep first and last points (polygon closure)
+        important_indices = {0, len(ring) - 1}
+        
+        # Sort by importance and keep the most important vertices
+        angles.sort(key=lambda x: x[1], reverse=True)
+        num_to_keep = max_points - 2  # -2 for first and last
+        
+        for i, _ in angles[:num_to_keep]:
+            important_indices.add(i)
+        
+        # Build simplified ring maintaining order
+        simplified = [ring[i] for i in sorted(important_indices)]
+        
+        # Ensure polygon is closed
+        if simplified[0] != simplified[-1]:
+            simplified.append(simplified[0])
+        
+        return simplified
+    
+    def _count_roi_points(self, roi: dict) -> int:
+        """Count the number of points in an ROI polygon."""
+        if not roi or not isinstance(roi, dict):
+            return 0
+        
+        coordinates = roi.get('coordinates')
+        if not coordinates or not coordinates[0]:
+            return 0
+        
+        return len(coordinates[0])

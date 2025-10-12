@@ -226,44 +226,63 @@ export default function Home() {
     return null;
   };
 
-  // Helper function to get ROI for any location using geocoding
+  // Helper function to get ROI for any location using the backend search service
+  // This uses our sophisticated NominatimClient with proper polygon fetching
   const getROIForLocation = async (location) => {
     try {
-      console.log(`🔍 Looking up coordinates for: ${location}`);
+      console.log(
+        `🔍 Looking up coordinates for: ${location} using search service`
+      );
 
-      // Use Nominatim (OpenStreetMap) geocoding API with polygon data
-      // polygon_geojson=1 to get actual city boundaries
-      const geocodingUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-        location
-      )}&limit=1&addressdetails=1&polygon_geojson=1`;
+      // Call backend search service (uses sophisticated NominatimClient)
+      const SEARCH_SERVICE_URL = "http://localhost:8001"; // Search service port
 
-      const response = await fetch(geocodingUrl, {
-        headers: {
-          "User-Agent": "GeoLLM/1.0", // Required by Nominatim
-        },
-      });
+      const response = await fetch(
+        `${SEARCH_SERVICE_URL}/search/location-data`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            location_name: location,
+            location_type: "city",
+          }),
+        }
+      );
 
       if (!response.ok) {
-        throw new Error(`Geocoding failed: ${response.status}`);
+        throw new Error(`Search service failed: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log(`📊 Search service response:`, {
+        success: data.success,
+        hasPolygon: !!data.polygon_geometry,
+        polygonType: data.polygon_geometry?.type,
+        isFallback: data.is_fallback,
+        area: data.area_km2,
+      });
 
-      if (!data || data.length === 0) {
-        throw new Error(`Location not found: ${location}`);
+      if (!data.success || !data.coordinates) {
+        throw new Error(data.error || `Location not found: ${location}`);
       }
 
-      const result = data[0];
-      const lat = parseFloat(result.lat);
-      const lng = parseFloat(result.lon); // Nominatim returns 'lon', not 'lng'
-      const displayName = result.display_name || location;
+      const lat = data.coordinates.lat;
+      const lng = data.coordinates.lng;
+      const displayName = data.administrative_info?.name || location;
 
       console.log(`📍 Found coordinates: ${lat}, ${lng} for ${displayName}`);
 
-      // Try to use actual polygon boundary from Nominatim
-      if (result.geojson && result.geojson.type && result.geojson.coordinates) {
-        const geomType = result.geojson.type;
-        let coordinates = result.geojson.coordinates;
+      // Use polygon geometry from search service
+      if (
+        data.polygon_geometry &&
+        data.polygon_geometry.type &&
+        data.polygon_geometry.coordinates
+      ) {
+        const geojson = data.polygon_geometry;
+        const geomType = geojson.type;
+        let coordinates = geojson.coordinates;
 
         console.log(`🗺️ Received geometry type: ${geomType}`);
 
@@ -271,27 +290,10 @@ export default function Home() {
         if (geomType === "Polygon") {
           const outerRing = coordinates[0];
           console.log(`   Polygon with ${outerRing.length} vertices`);
+          console.log(
+            `✅ Using actual city boundary polygon from search service`
+          );
 
-          // Simplify if too complex (more than 500 points)
-          if (outerRing.length > 500) {
-            console.log(`   Simplifying complex polygon...`);
-            const step = Math.ceil(outerRing.length / 500);
-            const simplified = [];
-            for (let i = 0; i < outerRing.length; i += step) {
-              simplified.push(outerRing[i]);
-            }
-            // Ensure polygon is closed
-            if (
-              simplified[0][0] !== simplified[simplified.length - 1][0] ||
-              simplified[0][1] !== simplified[simplified.length - 1][1]
-            ) {
-              simplified.push(simplified[0]);
-            }
-            coordinates = [simplified];
-            console.log(`   Simplified to ${simplified.length} vertices`);
-          }
-
-          console.log(`✅ Using actual city boundary polygon`);
           return {
             type: "Polygon",
             coordinates: coordinates,
@@ -299,120 +301,79 @@ export default function Home() {
             center: [lng, lat],
           };
         } else if (geomType === "MultiPolygon") {
-          console.log(`   MultiPolygon with ${coordinates.length} polygons`);
-
-          // Find the largest polygon
+          // Use the largest polygon from MultiPolygon
           let largestPolygon = coordinates[0];
-          let maxVertices = coordinates[0][0].length;
+          let maxArea = 0;
 
-          for (let i = 1; i < coordinates.length; i++) {
-            const vertexCount = coordinates[i][0].length;
-            if (vertexCount > maxVertices) {
-              maxVertices = vertexCount;
+          for (let i = 0; i < coordinates.length; i++) {
+            const area = coordinates[i][0].length; // Rough area by vertex count
+            if (area > maxArea) {
+              maxArea = area;
               largestPolygon = coordinates[i];
             }
           }
 
-          const outerRing = largestPolygon[0];
+          console.log(`   MultiPolygon with ${coordinates.length} parts`);
           console.log(
-            `   Using largest polygon with ${outerRing.length} vertices`
+            `   Using largest polygon with ${largestPolygon[0].length} vertices`
+          );
+          console.log(
+            `✅ Using actual city boundary polygon from search service`
           );
 
-          // Simplify if too complex
-          let finalCoordinates = largestPolygon;
-          if (outerRing.length > 500) {
-            console.log(`   Simplifying complex polygon...`);
-            const step = Math.ceil(outerRing.length / 500);
-            const simplified = [];
-            for (let i = 0; i < outerRing.length; i += step) {
-              simplified.push(outerRing[i]);
-            }
-            // Ensure closed
-            if (
-              simplified[0][0] !== simplified[simplified.length - 1][0] ||
-              simplified[0][1] !== simplified[simplified.length - 1][1]
-            ) {
-              simplified.push(simplified[0]);
-            }
-            finalCoordinates = [simplified];
-            console.log(`   Simplified to ${simplified.length} vertices`);
-          }
-
-          console.log(
-            `✅ Using actual city boundary polygon from MultiPolygon`
-          );
           return {
             type: "Polygon",
-            coordinates: finalCoordinates,
+            coordinates: largestPolygon,
             display_name: displayName,
             center: [lng, lat],
           };
-        } else {
-          console.warn(
-            `   Unsupported geometry type: ${geomType}, using fallback`
-          );
         }
-      } else {
+      }
+
+      // If no polygon geometry, use bounding box
+      if (data.bounding_box) {
+        const bbox = data.bounding_box;
         console.warn(
-          `⚠️ No polygon data available from Nominatim, using bounding box`
+          `⚠️ No polygon geometry, using bounding box from search service`
         );
+
+        return {
+          type: "Polygon",
+          coordinates: [
+            [
+              [bbox.west, bbox.south],
+              [bbox.east, bbox.south],
+              [bbox.east, bbox.north],
+              [bbox.west, bbox.north],
+              [bbox.west, bbox.south],
+            ],
+          ],
+          display_name: displayName,
+          center: [lng, lat],
+        };
       }
 
-      // Fallback: Use bounding box if polygon not available
-      let minLat, maxLat, minLng, maxLng;
-
-      if (result.boundingbox && result.boundingbox.length === 4) {
-        // Nominatim provides boundingbox as [minLat, maxLat, minLng, maxLng]
-        minLat = parseFloat(result.boundingbox[0]);
-        maxLat = parseFloat(result.boundingbox[1]);
-        minLng = parseFloat(result.boundingbox[2]);
-        maxLng = parseFloat(result.boundingbox[3]);
-        console.log(
-          `📦 Fallback: Using rectangular bounding box from Nominatim`
-        );
-      } else {
-        // Calculate bounding box based on location type
-        let bounds = 0.1; // Default 0.1 degrees (~11km)
-
-        // Adjust bounds based on location type
-        if (result.type === "city" || result.type === "town") {
-          bounds = 0.15; // ~17km for cities
-        } else if (
-          result.type === "state" ||
-          result.type === "administrative"
-        ) {
-          bounds = 0.5; // ~55km for states
-        } else if (result.type === "country") {
-          bounds = 2.0; // ~220km for countries
-        } else if (result.type === "village" || result.type === "hamlet") {
-          bounds = 0.05; // ~5.5km for villages
-        }
-
-        minLat = lat - bounds;
-        maxLat = lat + bounds;
-        minLng = lng - bounds;
-        maxLng = lng + bounds;
-        console.log(`📦 Calculated bounding box with ${bounds}° radius`);
-      }
-
-      // Create a rectangular ROI from bounding box
-      console.log(`✅ Created rectangular ROI for ${displayName}`);
+      // Last resort: calculate bounding box from center
+      console.warn(
+        `⚠️ No polygon or bounding box data, creating estimated box`
+      );
+      const offset = 0.1; // ~11km
       return {
         type: "Polygon",
         coordinates: [
           [
-            [minLng, minLat],
-            [maxLng, minLat],
-            [maxLng, maxLat],
-            [minLng, maxLat],
-            [minLng, minLat],
+            [lng - offset, lat - offset],
+            [lng + offset, lat - offset],
+            [lng + offset, lat + offset],
+            [lng - offset, lat + offset],
+            [lng - offset, lat - offset],
           ],
         ],
         display_name: displayName,
         center: [lng, lat],
       };
     } catch (error) {
-      console.error("Error geocoding location:", error);
+      console.error(`❌ Error getting ROI for ${location}:`, error);
 
       // Fallback: Try to extract coordinates if location contains lat,lng
       const coordMatch = location.match(/(\d+\.?\d*),\s*(\d+\.?\d*)/);
@@ -439,23 +400,7 @@ export default function Home() {
         };
       }
 
-      // Final fallback: Use Mumbai coordinates
-      console.log("⚠️ Using fallback Mumbai coordinates");
-      return {
-        type: "Polygon",
-        coordinates: [
-          [
-            [72.7777, 18.976],
-            [72.9777, 18.976],
-            [72.9777, 19.176],
-            [72.7777, 19.176],
-            [72.7777, 18.976],
-          ],
-        ],
-        display_name: "Mumbai, India (Fallback)",
-        center: [72.8777, 19.076],
-        bounds: 0.1,
-      };
+      throw error;
     }
   };
 
@@ -518,6 +463,16 @@ export default function Home() {
 
     // Store original ROI for comparison
     const originalROI = JSON.parse(JSON.stringify(roi));
+
+    // Debug: Log the ROI being sent
+    console.log("🚀 [SEND] ROI to backend:", {
+      type: roi?.type,
+      coordinates_rings: roi?.coordinates?.length,
+      first_ring_points: roi?.coordinates?.[0]?.length,
+      display_name: roi?.display_name,
+      is_polygon: roi?.type === "Polygon",
+      is_multipolygon: roi?.type === "MultiPolygon",
+    });
 
     // Add initial COT message
     const cotMessageId = Date.now();
@@ -946,6 +901,7 @@ export default function Home() {
           isCollapsed={leftCollapsed}
           onToggle={() => updateLeftCollapsed(!leftCollapsed)}
           position="left"
+          onNewChat={clearChat}
           data-sidebar="left"
         >
           {/* Header with Logo */}
@@ -978,6 +934,7 @@ export default function Home() {
             {/* New Chat Button with Gradient */}
             <button
               id="new-chat-button"
+              onClick={clearChat}
               className="new-chat-button w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-6 py-4 flex items-center gap-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-[1.02] font-semibold text-base"
             >
               <svg
@@ -1092,61 +1049,10 @@ export default function Home() {
                 </svg>
               </div>
               <div className="flex-1">
-                <p className="text-white text-base font-semibold">Mohit</p>
-                <p className="text-white/60 text-sm flex items-center gap-2">
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  Free Plan
-                </p>
+                <p className="text-white text-base font-semibold">Pranay</p>
               </div>
             </div>
             {/* Notification Indicator */}
-            <div className="bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-2xl px-4 py-3 flex items-center justify-between shadow-lg border border-blue-500/30 transition-all duration-200 hover:shadow-xl hover:scale-105">
-              <div className="flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-white/80"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 17h5l-5 5v-5zM4.19 4.19A2 2 0 006.32 3h11.36a2 2 0 011.13 1.19L21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5l3.62-10.81z"
-                  />
-                </svg>
-                <span className="text-white text-sm font-medium">
-                  2 Updates
-                </span>
-              </div>
-              <button className="text-white/80 text-sm transition-all duration-200 hover:scale-110 hover:text-white">
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
           </div>
         </CollapsibleSidebar>
 
@@ -1157,21 +1063,14 @@ export default function Home() {
             {/* Chat Header */}
             <div className="bg-black/40 backdrop-blur-xl p-4 shadow-2xl border-b border-white/10">
               <div className="flex items-center justify-between relative">
-                {/* Left: Get Plus Button */}
-                <div className="flex-shrink-0 flex items-center gap-3">
-                  <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl px-4 py-2 text-sm font-medium transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105">
-                    Get Plus
-                  </button>
-                </div>
-
                 {/* Center: Title */}
-                <div className="absolute left-1/2 transform -translate-x-1/2">
+                <div className="flex-1 flex justify-center">
                   <h1 className="text-white font-bold text-3xl md:text-4xl">
                     GeoLLM
                   </h1>
                 </div>
 
-                {/* Right: Settings and Clear Chat Buttons */}
+                {/* Right: Clear Chat Button */}
                 <div className="flex items-center gap-3 flex-shrink-0">
                   {messages.length > 0 && (
                     <button
@@ -1194,38 +1093,14 @@ export default function Home() {
                       </svg>
                     </button>
                   )}
-                  <button
-                    id="settings-button"
-                    className="settings-button text-white/70 hover:text-white transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10"
-                  >
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                  </button>
                 </div>
               </div>
             </div>
 
             {/* Chat Messages - Welcome or Message History */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-8 pb-4">
               {messages.length === 0 && !isProcessing ? (
-                <div className="flex items-center justify-center h-full">
+                <div className="flex items-center justify-center h-full -mt-12">
                   <div className="text-center max-w-2xl relative z-20 ml-16 w-full">
                     <div className="text-white font-medium text-5xl mb-6 leading-tight">
                       What&apos;s on your mind today?
@@ -1302,7 +1177,7 @@ export default function Home() {
             </div>
 
             {/* Chat Input Area */}
-            <div className="p-8">
+            <div className="pl-12 pr-4 -mt-8 pb-2">
               <div className="flex justify-center">
                 <div className="w-full max-w-6xl">
                   <div className="relative">
@@ -1439,24 +1314,6 @@ export default function Home() {
                           />
                         </svg>
                       </label>
-                      <button
-                        className="text-white/60 transition-all duration-200 p-2 rounded-xl hover:scale-110 hover:bg-white/10"
-                        aria-label="Microphone"
-                      >
-                        <svg
-                          className="w-6 h-6"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                          />
-                        </svg>
-                      </button>
                       <button
                         className="send-button bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl p-3 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 disabled:opacity-60"
                         aria-label="Send prompt"
@@ -1617,22 +1474,6 @@ export default function Home() {
                         {ragMessage ? ` · ${ragMessage}` : ""}
                       </div>
                     )}
-                    <button className="text-white/60 text-sm flex items-center gap-2 transition-all duration-200 px-4 py-2 rounded-xl hover:scale-105 hover:bg-white/10">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                        />
-                      </svg>
-                      Tools
-                    </button>
                   </div>
                 </div>
               </div>
