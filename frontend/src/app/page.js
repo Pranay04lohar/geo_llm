@@ -231,10 +231,11 @@ export default function Home() {
     try {
       console.log(`🔍 Looking up coordinates for: ${location}`);
 
-      // Use Nominatim (OpenStreetMap) geocoding API for any location worldwide
+      // Use Nominatim (OpenStreetMap) geocoding API with polygon data
+      // polygon_geojson=1 to get actual city boundaries
       const geocodingUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
         location
-      )}&limit=1&addressdetails=1`;
+      )}&limit=1&addressdetails=1&polygon_geojson=1`;
 
       const response = await fetch(geocodingUrl, {
         headers: {
@@ -259,78 +260,157 @@ export default function Home() {
 
       console.log(`📍 Found coordinates: ${lat}, ${lng} for ${displayName}`);
 
-      // Determine appropriate bounds based on location type and importance
-      let bounds = 0.1; // Default 0.1 degrees (~11km)
+      // Try to use actual polygon boundary from Nominatim
+      if (result.geojson && result.geojson.type && result.geojson.coordinates) {
+        const geomType = result.geojson.type;
+        let coordinates = result.geojson.coordinates;
 
-      // Adjust bounds based on location type
-      if (result.type === "city" || result.type === "town") {
-        bounds = 0.15; // ~17km for cities
-      } else if (result.type === "state" || result.type === "administrative") {
-        bounds = 0.5; // ~55km for states
-      } else if (result.type === "country") {
-        bounds = 2.0; // ~220km for countries
-      } else if (result.type === "village" || result.type === "hamlet") {
-        bounds = 0.05; // ~5.5km for villages
+        console.log(`🗺️ Received geometry type: ${geomType}`);
+
+        // Handle different geometry types
+        if (geomType === "Polygon") {
+          const outerRing = coordinates[0];
+          console.log(`   Polygon with ${outerRing.length} vertices`);
+
+          // Simplify if too complex (more than 500 points)
+          if (outerRing.length > 500) {
+            console.log(`   Simplifying complex polygon...`);
+            const step = Math.ceil(outerRing.length / 500);
+            const simplified = [];
+            for (let i = 0; i < outerRing.length; i += step) {
+              simplified.push(outerRing[i]);
+            }
+            // Ensure polygon is closed
+            if (
+              simplified[0][0] !== simplified[simplified.length - 1][0] ||
+              simplified[0][1] !== simplified[simplified.length - 1][1]
+            ) {
+              simplified.push(simplified[0]);
+            }
+            coordinates = [simplified];
+            console.log(`   Simplified to ${simplified.length} vertices`);
+          }
+
+          console.log(`✅ Using actual city boundary polygon`);
+          return {
+            type: "Polygon",
+            coordinates: coordinates,
+            display_name: displayName,
+            center: [lng, lat],
+          };
+        } else if (geomType === "MultiPolygon") {
+          console.log(`   MultiPolygon with ${coordinates.length} polygons`);
+
+          // Find the largest polygon
+          let largestPolygon = coordinates[0];
+          let maxVertices = coordinates[0][0].length;
+
+          for (let i = 1; i < coordinates.length; i++) {
+            const vertexCount = coordinates[i][0].length;
+            if (vertexCount > maxVertices) {
+              maxVertices = vertexCount;
+              largestPolygon = coordinates[i];
+            }
+          }
+
+          const outerRing = largestPolygon[0];
+          console.log(
+            `   Using largest polygon with ${outerRing.length} vertices`
+          );
+
+          // Simplify if too complex
+          let finalCoordinates = largestPolygon;
+          if (outerRing.length > 500) {
+            console.log(`   Simplifying complex polygon...`);
+            const step = Math.ceil(outerRing.length / 500);
+            const simplified = [];
+            for (let i = 0; i < outerRing.length; i += step) {
+              simplified.push(outerRing[i]);
+            }
+            // Ensure closed
+            if (
+              simplified[0][0] !== simplified[simplified.length - 1][0] ||
+              simplified[0][1] !== simplified[simplified.length - 1][1]
+            ) {
+              simplified.push(simplified[0]);
+            }
+            finalCoordinates = [simplified];
+            console.log(`   Simplified to ${simplified.length} vertices`);
+          }
+
+          console.log(
+            `✅ Using actual city boundary polygon from MultiPolygon`
+          );
+          return {
+            type: "Polygon",
+            coordinates: finalCoordinates,
+            display_name: displayName,
+            center: [lng, lat],
+          };
+        } else {
+          console.warn(
+            `   Unsupported geometry type: ${geomType}, using fallback`
+          );
+        }
+      } else {
+        console.warn(
+          `⚠️ No polygon data available from Nominatim, using bounding box`
+        );
       }
 
-      // Special handling for major cities (larger bounds)
-      const majorCities = [
-        "mumbai",
-        "delhi",
-        "bangalore",
-        "kolkata",
-        "chennai",
-        "hyderabad",
-        "pune",
-        "ahmedabad",
-        "jaipur",
-        "london",
-        "new york",
-        "tokyo",
-        "paris",
-        "berlin",
-        "moscow",
-        "beijing",
-        "shanghai",
-        "sydney",
-        "melbourne",
-        "toronto",
-        "vancouver",
-        "mexico city",
-        "sao paulo",
-        "buenos aires",
-        "cairo",
-        "lagos",
-        "nairobi",
-        "johannesburg",
-        "cape town",
-      ];
+      // Fallback: Use bounding box if polygon not available
+      let minLat, maxLat, minLng, maxLng;
 
-      if (
-        majorCities.some((city) => displayName.toLowerCase().includes(city))
-      ) {
-        bounds = Math.max(bounds, 0.2); // At least 22km for major cities
+      if (result.boundingbox && result.boundingbox.length === 4) {
+        // Nominatim provides boundingbox as [minLat, maxLat, minLng, maxLng]
+        minLat = parseFloat(result.boundingbox[0]);
+        maxLat = parseFloat(result.boundingbox[1]);
+        minLng = parseFloat(result.boundingbox[2]);
+        maxLng = parseFloat(result.boundingbox[3]);
+        console.log(
+          `📦 Fallback: Using rectangular bounding box from Nominatim`
+        );
+      } else {
+        // Calculate bounding box based on location type
+        let bounds = 0.1; // Default 0.1 degrees (~11km)
+
+        // Adjust bounds based on location type
+        if (result.type === "city" || result.type === "town") {
+          bounds = 0.15; // ~17km for cities
+        } else if (
+          result.type === "state" ||
+          result.type === "administrative"
+        ) {
+          bounds = 0.5; // ~55km for states
+        } else if (result.type === "country") {
+          bounds = 2.0; // ~220km for countries
+        } else if (result.type === "village" || result.type === "hamlet") {
+          bounds = 0.05; // ~5.5km for villages
+        }
+
+        minLat = lat - bounds;
+        maxLat = lat + bounds;
+        minLng = lng - bounds;
+        maxLng = lng + bounds;
+        console.log(`📦 Calculated bounding box with ${bounds}° radius`);
       }
 
-      // Create a rectangular ROI in the format expected by backend
-      const roi = {
+      // Create a rectangular ROI from bounding box
+      console.log(`✅ Created rectangular ROI for ${displayName}`);
+      return {
         type: "Polygon",
         coordinates: [
           [
-            [lng - bounds, lat - bounds],
-            [lng + bounds, lat - bounds],
-            [lng + bounds, lat + bounds],
-            [lng - bounds, lat + bounds],
-            [lng - bounds, lat - bounds],
+            [minLng, minLat],
+            [maxLng, minLat],
+            [maxLng, maxLat],
+            [minLng, maxLat],
+            [minLng, minLat],
           ],
         ],
         display_name: displayName,
         center: [lng, lat],
-        bounds: bounds,
       };
-
-      console.log(`✅ Created ROI for ${displayName} with bounds: ${bounds}°`);
-      return roi;
     } catch (error) {
       console.error("Error geocoding location:", error);
 
@@ -428,6 +508,17 @@ export default function Home() {
     setCotSteps([]);
     setCurrentStep(0);
 
+    // Debug: Log ROI being sent to backend
+    console.log("🚀 [SEND] ROI to backend:", {
+      type: roi?.type,
+      coordinates_rings: roi?.coordinates?.length,
+      first_ring_points: roi?.coordinates?.[0]?.length,
+      display_name: roi?.display_name,
+    });
+
+    // Store original ROI for comparison
+    const originalROI = JSON.parse(JSON.stringify(roi));
+
     // Add initial COT message
     const cotMessageId = Date.now();
     setMessages((prev) => [
@@ -520,6 +611,39 @@ export default function Home() {
 
               // If this is the final step, replace COT with result
               if (stepData.final_result) {
+                // Debug: Log ROI received from backend
+                console.log("📥 [RECEIVE] ROI from backend:", {
+                  type: stepData.final_result.roi?.type,
+                  coordinates_rings:
+                    stepData.final_result.roi?.coordinates?.length,
+                  first_ring_points:
+                    stepData.final_result.roi?.coordinates?.[0]?.length,
+                  display_name: stepData.final_result.roi?.display_name,
+                  full_roi: stepData.final_result.roi,
+                });
+
+                // Compare with original
+                console.log("🔍 [COMPARE] Original vs Received:");
+                console.log(
+                  "  Original points:",
+                  originalROI?.coordinates?.[0]?.length
+                );
+                console.log(
+                  "  Received points:",
+                  stepData.final_result.roi?.coordinates?.[0]?.length
+                );
+
+                // If ROI was simplified, use original
+                if (
+                  originalROI?.coordinates?.[0]?.length > 10 &&
+                  stepData.final_result.roi?.coordinates?.[0]?.length <= 5
+                ) {
+                  console.warn(
+                    "⚠️ ROI was simplified to bounding box! Using original polygon instead."
+                  );
+                  stepData.final_result.roi = originalROI;
+                }
+
                 setTimeout(() => {
                   const formattedResult = formatFinalResult(
                     stepData.final_result
@@ -605,6 +729,18 @@ export default function Home() {
   const formatFinalResult = (finalResult) => {
     const { analysis_type, tile_url, stats, roi, service_used } = finalResult;
 
+    // Debug: Log ROI structure from backend
+    console.log(
+      "🔍 DEBUG - formatFinalResult - Full finalResult:",
+      finalResult
+    );
+    console.log("🔍 DEBUG - formatFinalResult - ROI structure:", roi);
+    console.log("🔍 DEBUG - formatFinalResult - ROI.geometry:", roi?.geometry);
+    console.log(
+      "🔍 DEBUG - formatFinalResult - ROI type:",
+      roi?.type || roi?.geometry?.type
+    );
+
     // Generate AI analysis text based on the results
     let aiAnalysis = generateAIAnalysis(analysis_type, stats, roi);
 
@@ -635,17 +771,17 @@ export default function Home() {
         analysis += `🌊 **Significant Water Presence Detected**\n\n`;
         analysis += `The analysis reveals substantial water coverage in ${location}, with ${waterPct.toFixed(
           1
-        )}% of the area classified as water bodies. This indicates a region rich in aquatic resources, including rivers, lakes, reservoirs, or coastal areas.\n\n`;
+        )}% of the area classified as water bodies. This indicates a region rich in aquatic resources, including rivers, lakes, reservoirs, or coastal areas. Such significant water presence plays a vital role in local hydrology, supporting aquatic biodiversity, regulating microclimate, and providing essential ecosystem services. These water bodies may serve multiple functions including water supply, irrigation, fisheries, recreation, and flood regulation. Sustainable water resource management is crucial to maintain water quality, preserve aquatic habitats, and balance human needs with environmental conservation. Monitoring water levels and quality over time can help track seasonal variations and long-term trends related to climate change impacts.\n\n`;
       } else if (waterPct > 5) {
         analysis += `💧 **Moderate Water Coverage**\n\n`;
         analysis += `${location} shows moderate water presence at ${waterPct.toFixed(
           1
-        )}%, suggesting a balanced mix of water bodies and terrestrial features. This could include smaller rivers, ponds, or seasonal water features.\n\n`;
+        )}%, suggesting a balanced mix of water bodies and terrestrial features. This could include smaller rivers, ponds, or seasonal water features that contribute to local water security and ecological diversity. These water resources are important for agricultural irrigation, domestic water supply, and supporting riparian ecosystems that provide habitat for various species. The moderate water coverage indicates potential vulnerability to seasonal variations and climate variability, making water conservation and watershed management priorities. Implementing rainwater harvesting, protecting existing water bodies from pollution and encroachment, and maintaining natural drainage systems can help ensure sustainable water availability. Understanding the seasonal dynamics of these water features is important for effective water resource planning.\n\n`;
       } else {
         analysis += `🏞️ **Primarily Terrestrial Region**\n\n`;
         analysis += `The analysis indicates that ${location} is predominantly a land-based region with only ${waterPct.toFixed(
           1
-        )}% water coverage. This suggests an urban, agricultural, or forested landscape with minimal water bodies.\n\n`;
+        )}% water coverage. This suggests an urban, agricultural, or forested landscape with minimal surface water bodies. While limited water coverage is typical for urban and developed areas, it highlights the importance of efficient water management, groundwater conservation, and development of water infrastructure for sustainable growth. In urban contexts, this emphasizes the need for innovative water solutions such as rainwater harvesting systems, wastewater recycling, and artificial recharge of groundwater to augment limited surface water resources. Creating and maintaining small water features like ponds, lakes, or wetlands can also provide multiple benefits including microclimate regulation, biodiversity support, and recreational amenities. For agricultural areas, water-efficient irrigation techniques and crop selection suited to local water availability are essential.\n\n`;
       }
 
       analysis += `**Key Statistics:**\n`;
@@ -672,17 +808,17 @@ export default function Home() {
         analysis += `🔥 **High Temperature Region**\n\n`;
         analysis += `${location} exhibits high land surface temperatures with an average of ${meanTemp.toFixed(
           1
-        )}°C. This suggests urban heat island effects, arid conditions, or industrial activity.\n\n`;
+        )}°C. This elevated thermal signature is indicative of urban heat island effects, where concrete and asphalt surfaces absorb and retain heat, or arid environmental conditions with limited vegetation cover. Such high temperatures can significantly impact human comfort, increase energy consumption for cooling, and exacerbate health risks during heat waves. Urban planning interventions such as increasing tree canopy cover, implementing cool roofing materials, creating water features, and developing green infrastructure can help mitigate these heat effects. In industrial zones, heat-reflective surfaces and strategic vegetation placement can reduce surface temperatures and improve working conditions.\n\n`;
       } else if (meanTemp > 25) {
         analysis += `🌡️ **Moderate Temperature Zone**\n\n`;
         analysis += `The region shows moderate thermal conditions with a mean temperature of ${meanTemp.toFixed(
           1
-        )}°C, typical of temperate climates or mixed land use areas.\n\n`;
+        )}°C, typical of temperate climates or mixed land use areas. This balanced thermal profile suggests a mix of built-up areas, vegetation patches, and open spaces that collectively moderate surface temperatures. Such temperature ranges are generally comfortable for human habitation, though localized hot spots may still exist in densely built areas with limited green cover. Maintaining this thermal balance through sustainable urban planning—including preservation of existing green spaces, promotion of mixed land use, and thoughtful building design—is crucial for long-term livability. Climate adaptation strategies should focus on enhancing resilience to future temperature increases through nature-based solutions and smart infrastructure.\n\n`;
       } else {
         analysis += `❄️ **Cool Temperature Region**\n\n`;
         analysis += `${location} displays relatively cool surface temperatures averaging ${meanTemp.toFixed(
           1
-        )}°C, possibly indicating forested areas, water bodies, or high elevation.\n\n`;
+        )}°C, possibly indicating forested areas, water bodies, or high elevation zones. These cooler thermal conditions are highly beneficial, suggesting the presence of substantial vegetation cover, proximity to water sources, or favorable topographic features that naturally regulate temperature. Such areas provide important ecosystem services including microclimate regulation, air quality improvement, and urban cooling effects that can benefit surrounding regions. Preserving these cool zones is critical for climate resilience, as they serve as natural refuges during heat events and contribute to overall environmental health. If this area is experiencing development pressure, it's important to maintain green cover and natural features to preserve these thermal benefits.\n\n`;
       }
 
       analysis += `**Temperature Statistics:**\n`;
@@ -710,22 +846,22 @@ export default function Home() {
         analysis += `🌿 **Dense Vegetation**\n\n`;
         analysis += `${location} shows excellent vegetation health with an NDVI of ${meanNDVI.toFixed(
           3
-        )}, indicating dense forests, healthy crops, or well-maintained green spaces.\n\n`;
+        )}, indicating dense forests, healthy crops, or well-maintained green spaces. This high vegetation index reflects thriving ecosystems with substantial photosynthetic activity, typically found in tropical forests, mature agricultural fields, or areas with extensive green cover. Such regions play a crucial role in carbon sequestration, biodiversity conservation, and maintaining local climate stability. The dense canopy cover also helps in soil conservation, water retention, and providing habitat for diverse flora and fauna.\n\n`;
       } else if (meanNDVI > 0.3) {
         analysis += `🌱 **Moderate Vegetation**\n\n`;
         analysis += `The region displays moderate vegetation cover (NDVI: ${meanNDVI.toFixed(
           3
-        )}), typical of grasslands, agricultural areas, or mixed land use.\n\n`;
+        )}), typical of grasslands, agricultural areas, or mixed land use. This pattern is characteristic of semi-urban landscapes where built-up areas coexist with parks, gardens, and agricultural patches. For an urban area like this, the moderate NDVI values suggest opportunities for urban greening initiatives such as creating green corridors, expanding park networks, or implementing rooftop gardens. Enhancing vegetation cover could improve air quality, reduce urban heat island effects, and provide recreational spaces for residents. Seasonal variations may also influence these readings, with vegetation cover fluctuating based on agricultural cycles and monsoon patterns.\n\n`;
       } else if (meanNDVI > 0.1) {
         analysis += `🌾 **Sparse Vegetation**\n\n`;
         analysis += `${location} has limited vegetation (NDVI: ${meanNDVI.toFixed(
           3
-        )}), suggesting arid conditions, urban areas, or recently harvested fields.\n\n`;
+        )}), suggesting arid conditions, urban areas, or recently harvested fields. This sparse vegetation pattern is typical for semi-arid urban regions where built-up infrastructure dominates the landscape. The scattered green patches indicate opportunities for strategic urban greening initiatives, such as tree planting programs along roadways, development of green corridors connecting existing parks, and promotion of vertical gardens on buildings. Improving vegetation cover in such areas can significantly enhance air quality by reducing particulate matter, mitigate urban heat island effects through increased shade and evapotranspiration, and create healthier living environments. Water-efficient native plant species would be ideal for sustainable greening in this climate zone.\n\n`;
       } else {
         analysis += `🏜️ **Minimal Vegetation**\n\n`;
         analysis += `The area shows very low vegetation index (NDVI: ${meanNDVI.toFixed(
           3
-        )}), indicating water bodies, urban areas, or barren land.\n\n`;
+        )}), indicating water bodies, urban areas, or barren land. This minimal vegetation reading is characteristic of densely built-up urban cores, industrial zones, exposed soil, or water-dominated landscapes. In urban contexts, such low NDVI values highlight the need for comprehensive greening strategies to improve environmental quality and livability. Potential interventions include creating pocket parks in underutilized spaces, implementing green infrastructure like bioswales and rain gardens, encouraging vertical and terrace gardens, and establishing urban forest initiatives. For barren or degraded lands, soil restoration and afforestation programs could help rebuild vegetation cover. In water-dominated areas, these readings are normal and indicate healthy aquatic ecosystems.\n\n`;
       }
 
       analysis += `**Vegetation Statistics:**\n`;
@@ -1346,12 +1482,18 @@ export default function Home() {
                           // Use real-time COT for geospatial analysis
                           if (!ragSessionId) {
                             // For geospatial queries, use real-time COT
-                            // First try to get location from the query or use a default
-                            const location =
-                              extractLocationFromQuery(userPrompt) ||
-                              "Mumbai, India";
-                            const roi = await getROIForLocation(location);
-                            await handleCOTStream(userPrompt, roi);
+                            try {
+                              // First try to get location from the query or use a default
+                              const location =
+                                extractLocationFromQuery(userPrompt) ||
+                                "Mumbai, India";
+                              const roi = await getROIForLocation(location);
+                              await handleCOTStream(userPrompt, roi);
+                            } finally {
+                              // Always reset processing state
+                              setIsProcessing(false);
+                              setEarthSpeed(0.002);
+                            }
                             return;
                           }
 

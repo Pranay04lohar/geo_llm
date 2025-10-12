@@ -57,7 +57,8 @@ export default function AnalysisResult({ content }) {
     : content;
   const debugEnabled = process.env.NEXT_PUBLIC_DEBUG_MAP === "1";
 
-  // Generate unique ID for this map instance
+  // Generate unique ID for this map instance - stable across renders
+  const mapInstanceKey = useRef(Date.now()).current;
   const mapId = useRef(
     `analysis-map-${Math.random().toString(36).substr(2, 9)}`
   );
@@ -92,7 +93,14 @@ export default function AnalysisResult({ content }) {
   // Initialize map when showMap becomes true
   useEffect(() => {
     if (!showMap || !hasMapData || !mapContainer.current) return;
-    if (map.current) return; // Prevent re-initialization
+
+    // Clean up existing map if it exists
+    if (map.current) {
+      console.log("Cleaning up existing map before reinitializing");
+      map.current.remove();
+      map.current = null;
+      setMapLoaded(false);
+    }
 
     // Clean up any orphaned tooltips before initializing
     cleanupAllTooltips();
@@ -171,14 +179,36 @@ export default function AnalysisResult({ content }) {
         }
 
         // Add ROI boundary if available
-        if (mapData.roi?.geometry) {
+        // Handle both mapData.roi.geometry and mapData.roi (direct geometry) formats
+        let roiGeometry = mapData.roi?.geometry || mapData.roi;
+
+        // Debug: Log the ROI structure
+        console.log("🔍 DEBUG - Full mapData.roi:", mapData.roi);
+        console.log("🔍 DEBUG - Extracted roiGeometry:", roiGeometry);
+        console.log("🔍 DEBUG - Geometry type:", roiGeometry?.type);
+        console.log(
+          "🔍 DEBUG - Coordinates length:",
+          roiGeometry?.coordinates?.length
+        );
+        if (roiGeometry?.coordinates?.[0]) {
+          console.log(
+            "🔍 DEBUG - First ring length:",
+            roiGeometry.coordinates[0].length
+          );
+        }
+
+        if (roiGeometry && roiGeometry.type && roiGeometry.coordinates) {
           try {
-            console.log("Adding ROI boundary");
+            console.log(
+              "✅ Adding ROI boundary -",
+              roiGeometry.type,
+              `with ${roiGeometry.coordinates[0]?.length || 0} points`
+            );
             map.current.addSource("roi", {
               type: "geojson",
               data: {
                 type: "Feature",
-                geometry: mapData.roi.geometry,
+                geometry: roiGeometry,
               },
             });
 
@@ -207,7 +237,18 @@ export default function AnalysisResult({ content }) {
             });
 
             // Fit map to ROI bounds
-            const coordinates = mapData.roi.geometry.coordinates[0];
+            // Handle both Polygon and MultiPolygon
+            let coordinates;
+            if (roiGeometry.type === "Polygon") {
+              coordinates = roiGeometry.coordinates[0];
+            } else if (roiGeometry.type === "MultiPolygon") {
+              // For MultiPolygon, use the first polygon's outer ring
+              coordinates = roiGeometry.coordinates[0][0];
+            } else {
+              console.warn("Unsupported geometry type:", roiGeometry.type);
+              return;
+            }
+
             const bounds = new maplibregl.LngLatBounds();
             coordinates.forEach((coord) => bounds.extend(coord));
             map.current.fitBounds(bounds, { padding: 50 });
@@ -219,109 +260,23 @@ export default function AnalysisResult({ content }) {
           console.warn("No ROI geometry available for boundary");
         }
 
-        // Load vector grid for instant hover (LST or NDVI analysis)
-        // Use analysis_type to determine which workflow is active
+        // Get analysis type for hover setup
         const analysisType = mapData.analysis_type?.toLowerCase();
-        if (
-          (analysisType === "lst" || analysisType === "ndvi") &&
-          mapData.roi?.geometry
-        ) {
-          const gridEndpoint =
-            analysisType === "lst"
-              ? "http://localhost:8000/lst/grid"
-              : "http://localhost:8000/ndvi/grid";
 
-          console.log(
-            `🔷 Loading ${analysisType.toUpperCase()} vector grid for fast hover...`
-          );
-          setGridLoaded(false);
-
-          fetch(gridEndpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              roi: mapData.roi.geometry,
-              cellSizeKm: 1.0, // 1km grid cells
-              startDate: "2024-01-01",
-              endDate: "2024-08-31",
-              scale: 1000,
-            }),
-          })
-            .then((resp) => resp.json())
-            .then((gridData) => {
-              if (gridData.success && gridData.features) {
-                lstGridData.current = gridData;
-
-                // Add grid source (used for instant sampling). For NDVI we also visualize the grid fill;
-                // for LST we avoid adding a fill to prevent the map from looking washed out.
-                if (!map.current.getSource("lst-grid")) {
-                  map.current.addSource("lst-grid", {
-                    type: "geojson",
-                    data: gridData,
-                  });
-
-                  // Only render the colored grid fill for NDVI; for LST keep the grid hidden (used just for sampling)
-                  if (analysisType === "ndvi") {
-                    const fillPaint = {
-                      "fill-color": [
-                        "interpolate",
-                        ["linear"],
-                        ["get", "mean_ndvi"],
-                        -0.2,
-                        "#d73027",
-                        0.0,
-                        "#fdae61",
-                        0.2,
-                        "#fee08b",
-                        0.4,
-                        "#abdda4",
-                        0.6,
-                        "#66c2a5",
-                        0.8,
-                        "#3288bd",
-                      ],
-                      "fill-opacity": 0.3,
-                    };
-
-                    map.current.addLayer({
-                      id: "lst-grid-fill",
-                      type: "fill",
-                      source: "lst-grid",
-                      paint: fillPaint,
-                    });
-                  }
-
-                  // Add outline layer
-                  map.current.addLayer({
-                    id: "lst-grid-outline",
-                    type: "line",
-                    source: "lst-grid",
-                    paint: {
-                      "line-color": "#888",
-                      "line-width": 0.5,
-                      "line-opacity": analysisType === "ndvi" ? 0.4 : 0.0,
-                    },
-                  });
-                }
-
-                setGridLoaded(true);
-                console.log(`✅ Loaded ${gridData.features.length} grid cells`);
-              }
-            })
-            .catch((err) => {
-              console.error("Failed to load LST grid:", err);
-            });
-        }
-
-        // Hover interactions enabled for LST/NDVI (sampling) and WATER (static info)
+        // ==================================================================
+        // PRIORITY 1: Set up hover interactions FIRST (before grid loading)
+        // This ensures hover works immediately even if grid loading hangs
+        // ==================================================================
         if (
           analysisType !== "lst" &&
           analysisType !== "ndvi" &&
           analysisType !== "water"
         ) {
+          console.log("Hover not enabled for analysis type:", analysisType);
           return;
         }
 
+        console.log("✅ Setting up hover interactions for:", analysisType);
         // Hover sampling tooltip for LST
         // Remove any existing tooltip first to prevent duplicates
         const existingTooltip = document.getElementById("lst-hover-tooltip");
@@ -612,13 +567,14 @@ export default function AnalysisResult({ content }) {
 
         // Geographic inside-ROI test using Turf with MultiPolygon support and fallback
         const isInsideROIAtPoint = (_point, lngLat) => {
-          if (!mapData.roi?.geometry) {
+          const roiGeomCheck = mapData.roi?.geometry || mapData.roi;
+          if (!roiGeomCheck) {
             console.warn("No ROI geometry available");
             return false;
           }
 
-          const geomType = mapData.roi.geometry.type;
-          const coords = mapData.roi.geometry.coordinates;
+          const geomType = roiGeomCheck.type;
+          const coords = roiGeomCheck.coordinates;
 
           console.log(
             `Checking point [${lngLat.lng.toFixed(4)}, ${lngLat.lat.toFixed(
@@ -766,6 +722,124 @@ export default function AnalysisResult({ content }) {
         });
       });
 
+      console.log("✅ Hover interactions set up successfully!");
+
+      // ==================================================================
+      // PRIORITY 2: Load vector grid in background (AFTER hover is ready)
+      // Grid loading happens asynchronously and won't block hover
+      // ==================================================================
+      const roiGeometryForGrid = mapData.roi?.geometry || mapData.roi;
+
+      if (
+        (analysisType === "lst" || analysisType === "ndvi") &&
+        roiGeometryForGrid
+      ) {
+        const gridEndpoint =
+          analysisType === "lst"
+            ? "http://localhost:8000/lst/grid"
+            : "http://localhost:8000/ndvi/grid";
+
+        console.log(
+          `🔷 Loading ${analysisType.toUpperCase()} vector grid for fast hover (with 15s timeout)...`
+        );
+        setGridLoaded(false);
+
+        // Use AbortController to properly cancel hung requests
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => {
+          console.warn("⏱️ Grid loading taking too long, aborting...");
+          abortController.abort();
+        }, 15000);
+
+        // Fetch grid data
+        fetch(gridEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roi: roiGeometryForGrid,
+            cellSizeKm: 1.0, // 1km grid cells
+            startDate: "2024-01-01",
+            endDate: "2024-08-31",
+            scale: 1000,
+          }),
+          signal: abortController.signal,
+        })
+          .then((resp) => resp.json())
+          .then((gridData) => {
+            clearTimeout(timeoutId);
+            if (gridData.success && gridData.features && map.current) {
+              lstGridData.current = gridData;
+
+              // Add grid source (used for instant sampling). For NDVI we also visualize the grid fill;
+              // for LST we avoid adding a fill to prevent the map from looking washed out.
+              if (!map.current.getSource("lst-grid")) {
+                map.current.addSource("lst-grid", {
+                  type: "geojson",
+                  data: gridData,
+                });
+
+                // Only render the colored grid fill for NDVI; for LST keep the grid hidden (used just for sampling)
+                if (analysisType === "ndvi") {
+                  const fillPaint = {
+                    "fill-color": [
+                      "interpolate",
+                      ["linear"],
+                      ["get", "mean_ndvi"],
+                      -0.2,
+                      "#d73027",
+                      0.0,
+                      "#fdae61",
+                      0.2,
+                      "#fee08b",
+                      0.4,
+                      "#abdda4",
+                      0.6,
+                      "#66c2a5",
+                      0.8,
+                      "#3288bd",
+                    ],
+                    "fill-opacity": 0.3,
+                  };
+
+                  map.current.addLayer({
+                    id: "lst-grid-fill",
+                    type: "fill",
+                    source: "lst-grid",
+                    paint: fillPaint,
+                  });
+                }
+
+                // Add outline layer
+                map.current.addLayer({
+                  id: "lst-grid-outline",
+                  type: "line",
+                  source: "lst-grid",
+                  paint: {
+                    "line-color": "#888",
+                    "line-width": 0.5,
+                    "line-opacity": analysisType === "ndvi" ? 0.4 : 0.0,
+                  },
+                });
+              }
+
+              setGridLoaded(true);
+              console.log(
+                `✅ Loaded ${gridData.features.length} grid cells (hover will be faster)`
+              );
+            }
+          })
+          .catch((err) => {
+            clearTimeout(timeoutId);
+            if (err.name === "AbortError") {
+              console.warn(`⏱️ Grid loading aborted after 15 seconds`);
+            } else {
+              console.warn(`⚠️ Grid loading failed: ${err.message}`);
+            }
+            setGridLoaded(false);
+            // Don't block - hover will fallback to API sampling
+          });
+      }
+
       map.current.on("error", (e) => {
         console.error("Map error:", e);
       });
@@ -773,7 +847,7 @@ export default function AnalysisResult({ content }) {
       console.error("Error initializing map:", error);
       setMapLoaded(false);
     }
-  }, [showMap]); // Only depend on showMap, not mapData
+  }, [showMap, hasMapData]); // Depend on showMap and hasMapData to reinitialize when data changes
 
   // Cleanup effect
   useEffect(() => {
@@ -883,7 +957,10 @@ export default function AnalysisResult({ content }) {
           )}
 
           {showMap && (
-            <div className="relative overflow-visible" key={mapId.current}>
+            <div
+              className="relative overflow-visible"
+              key={`${mapId.current}-${mapData.analysis_type}-${mapInstanceKey}`}
+            >
               <div
                 ref={mapContainer}
                 className="w-full h-96 relative"

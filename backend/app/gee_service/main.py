@@ -15,6 +15,8 @@ from typing import Dict, Any, Optional, List
 import logging
 import os
 import sys
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Simplified GEE initialization - no external dependencies
 def initialize_gee():
@@ -484,14 +486,32 @@ async def generate_ndvi_grid(request: NDVIGridRequest):
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
         from services.ndvi_service import NDVIService
-        result = NDVIService.generate_ndvi_grid(
-            roi_geojson=request.roi,
-            cell_size_km=request.cellSizeKm,
-            start_date=request.startDate,
-            end_date=request.endDate,
-            scale=request.scale,
-            cloud_threshold=request.cloudThreshold
-        )
+        
+        # Run grid generation with 30 second timeout to prevent backend hanging
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    executor,
+                    lambda: NDVIService.generate_ndvi_grid(
+                        roi_geojson=request.roi,
+                        cell_size_km=request.cellSizeKm,
+                        start_date=request.startDate,
+                        end_date=request.endDate,
+                        scale=request.scale,
+                        cloud_threshold=request.cloudThreshold
+                    )
+                ),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⏱️ NDVI grid generation timed out after 30 seconds")
+            raise HTTPException(status_code=408, detail="Grid generation timeout - ROI too large or GEE overloaded")
+        finally:
+            executor.shutdown(wait=False)
+        
         if not result.get("success", False):
             raise HTTPException(status_code=500, detail=result.get("error", "Grid generation failed"))
         return result
@@ -563,13 +583,31 @@ async def generate_lst_grid(request: LSTGridRequest):
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
         from services.lst_service import LSTService
-        result = LSTService.generate_lst_grid(
-            roi_geojson=request.roi,
-            cell_size_km=request.cellSizeKm,
-            start_date=request.startDate,
-            end_date=request.endDate,
-            scale=request.scale
-        )
+        
+        # Run grid generation with 30 second timeout to prevent backend hanging
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    executor,
+                    lambda: LSTService.generate_lst_grid(
+                        roi_geojson=request.roi,
+                        cell_size_km=request.cellSizeKm,
+                        start_date=request.startDate,
+                        end_date=request.endDate,
+                        scale=request.scale
+                    )
+                ),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⏱️ LST grid generation timed out after 30 seconds")
+            raise HTTPException(status_code=408, detail="Grid generation timeout - ROI too large or GEE overloaded")
+        finally:
+            executor.shutdown(wait=False)
+        
         if not result.get("success", False):
             raise HTTPException(status_code=500, detail=result.get("error", "Grid generation failed"))
         return result

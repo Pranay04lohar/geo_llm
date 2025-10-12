@@ -35,18 +35,21 @@ class SimpleStepProcessor:
     def _detect_analysis_type(self, user_prompt: str) -> str:
         """Detect analysis type from user prompt"""
         prompt_lower = user_prompt.lower()
-        if "water" in prompt_lower or "flood" in prompt_lower or "aquatic" in prompt_lower:
-            return "water"
-        elif "temperature" in prompt_lower or "lst" in prompt_lower or "thermal" in prompt_lower:
+        if "temperature" in prompt_lower or "lst" in prompt_lower or "thermal" in prompt_lower or "heat" in prompt_lower:
             return "lst"
-        elif "vegetation" in prompt_lower or "ndvi" in prompt_lower or "green" in prompt_lower:
+        elif "vegetation" in prompt_lower or "ndvi" in prompt_lower or "green" in prompt_lower or "lulc" in prompt_lower or "land use" in prompt_lower or "land cover" in prompt_lower:
             return "ndvi"
+        elif "water" in prompt_lower or "flood" in prompt_lower or "aquatic" in prompt_lower:
+            return "water"
         else:
-            return "water"  # Default to water analysis
+            return "ndvi"  # Default to NDVI/LULC analysis (most common)
     
     async def process_water_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process water analysis using existing working endpoint"""
         try:
+            # Debug: Log received ROI structure
+            logger.info(f"🔍 [WATER] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
+            
             # Step 1: Initialize
             yield {
                 "step": 1,
@@ -106,21 +109,16 @@ class SimpleStepProcessor:
             
             # Step 5: Complete
             logger.info(f"🎯 Preparing final result with analysis_data keys: {list(analysis_data.keys()) if analysis_data else 'None'}")
+            
+            # Build final result - pass ROI as-is without reformatting
             final_result = {
                 "analysis_type": "water",
                 "tile_url": analysis_data.get("urlFormat"),
                 "stats": analysis_data.get("mapStats"),
-                "roi": {
-                    "geometry": {
-                        "type": roi.get("type", "Polygon"),
-                        "coordinates": roi.get("coordinates", [])
-                    },
-                    "display_name": roi.get("display_name", "Analysis Area"),
-                    "center": roi.get("center", [0, 0])
-                },
+                "roi": roi,  # Pass ROI directly without restructuring
                 "service_used": "GEE"
             }
-            logger.info(f"🎯 Final result: {final_result}")
+            logger.info(f"🎯 Final result created with ROI")
             
             yield {
                 "step": 5,
@@ -144,6 +142,9 @@ class SimpleStepProcessor:
     async def process_lst_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process LST analysis using existing working endpoint"""
         try:
+            # Debug: Log received ROI structure
+            logger.info(f"🔍 [LST] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
+            
             # Step 1: Initialize
             yield {
                 "step": 1,
@@ -224,14 +225,7 @@ class SimpleStepProcessor:
                         **analysis_data.get("mapStats", {}),
                         "total_area_km2": analysis_data.get("roi_area_km2", 0)
                     },
-                    "roi": {
-                        "geometry": {
-                            "type": roi.get("type", "Polygon"),
-                            "coordinates": roi.get("coordinates", [])
-                        },
-                        "display_name": roi.get("display_name", "Analysis Area"),
-                        "center": roi.get("center", [0, 0])
-                    },
+                    "roi": roi,  # Pass ROI directly without restructuring
                     "service_used": "GEE"
                 }
             }
@@ -249,6 +243,9 @@ class SimpleStepProcessor:
     async def process_ndvi_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process NDVI analysis using existing working endpoint"""
         try:
+            # Debug: Log received ROI structure
+            logger.info(f"🔍 [NDVI] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
+            
             # Step 1: Initialize
             yield {
                 "step": 1,
@@ -329,14 +326,7 @@ class SimpleStepProcessor:
                         **analysis_data.get("mapStats", {}).get("ndvi_statistics", {}),
                         "total_area_km2": analysis_data.get("roi_area_km2", 0)
                     },
-                    "roi": {
-                        "geometry": {
-                            "type": roi.get("type", "Polygon"),
-                            "coordinates": roi.get("coordinates", [])
-                        },
-                        "display_name": roi.get("display_name", "Analysis Area"),
-                        "center": roi.get("center", [0, 0])
-                    },
+                    "roi": roi,  # Pass ROI directly without restructuring
                     "service_used": "GEE"
                 }
             }
