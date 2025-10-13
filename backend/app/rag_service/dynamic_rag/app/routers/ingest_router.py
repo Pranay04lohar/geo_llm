@@ -41,6 +41,9 @@ class UploadResponse(BaseModel):
     files_processed: int
     documents_extracted: int
     user_quota_remaining: int
+    vectors_created: int
+    ocr_available: bool = False
+    warnings: list = []
 
 
 class UploadError(BaseModel):
@@ -218,12 +221,19 @@ async def upload_files(
         max_files = FILE_PROCESSING_CONFIG.get("max_files_per_user_per_day", 10)
         remaining_quota = max(0, max_files - updated_count)
         
+        # Add warnings
+        warnings = []
+        warnings.append("OCR and advanced table extraction are currently unavailable. Images, graphs, and complex tables in PDFs will not be processed. Basic table text may be captured through text extraction.")
+        
         return UploadResponse(
             session_id=session_id,
             message=f"Successfully processed {len(processed_files)} files and extracted {total_documents} documents",
             files_processed=len(processed_files),
             documents_extracted=total_documents,
-            user_quota_remaining=remaining_quota
+            user_quota_remaining=remaining_quota,
+            vectors_created=total_documents,
+            ocr_available=False,
+            warnings=warnings
         )
         
     except HTTPException:
@@ -265,6 +275,42 @@ async def get_session_info(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving session information: {str(e)}"
+        )
+
+
+@router.get(
+    "/session/{session_id}/stats",
+    summary="Get session statistics",
+    description="Get detailed statistics about a session including vector count and progress."
+)
+async def get_session_stats(
+    session_id: str,
+    rag_store: RAGStore = Depends(get_rag_store)
+):
+    """Get session statistics for progress tracking."""
+    try:
+        session_info = await rag_store.get_session_info(session_id)
+        
+        if not session_info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found or expired"
+            )
+        
+        return {
+            "session_id": session_id,
+            "vectors_created": session_info.get("document_count", 0),
+            "status": "completed",
+            "ocr_available": False
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session stats: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving session statistics: {str(e)}"
         )
 
 

@@ -136,6 +136,12 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     try:
         agent = get_agent()
         
+        # Log RAG session if provided
+        if request.rag_session_id:
+            logger.info(f"RAG session ID provided: {request.rag_session_id[:8]}...")
+        else:
+            logger.info("No RAG session ID provided")
+        
         # Process the query
         result = agent.process_query(request.query, request.rag_session_id)
         

@@ -12,6 +12,7 @@
     "@react-three/drei": "^10.6.1",
     "@react-three/fiber": "^9.3.0",
     "@turf/turf": "^7.2.0",
+    "framer-motion": "^12.23.24",
     "intro.js": "^8.3.2",
     "maplibre-gl": "^5.6.2",
     "next": "15.4.5",

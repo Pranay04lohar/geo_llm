@@ -50,10 +50,10 @@ def get_openrouter_config():
         "ner_model": os.environ.get("OPENROUTER_NER_MODEL", "openai/gpt-oss-20b:free"),
         # Intent classification model - medium model for intent understanding
         "intent_model": os.environ.get("OPENROUTER_INTENT_MODEL", "openai/gpt-oss-20b:free"),
-        # Response generation model - larger model for complex analysis
+        # Response generation model - fast model for quick responses
         "response_model": os.environ.get("OPENROUTER_RESPONSE_MODEL", "openai/gpt-oss-20b:free"),
         # Planner model - for backward compatibility
-        "planner_model": os.environ.get("OPENROUTER_PLANNER_MODEL", os.environ.get("OPENROUTER_RESPONSE_MODEL", "mistralai/mistral-7b-instruct:free")), 
+        "planner_model": os.environ.get("OPENROUTER_PLANNER_MODEL", os.environ.get("OPENROUTER_RESPONSE_MODEL", "openai/gpt-oss-20b:free")), 
         "referrer": os.environ.get("OPENROUTER_REFERRER", "http://localhost"),
         "app_title": os.environ.get("OPENROUTER_APP_TITLE", "GeoLLM Agent")
     }

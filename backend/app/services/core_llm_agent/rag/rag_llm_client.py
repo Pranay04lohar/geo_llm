@@ -240,8 +240,8 @@ class RAGLLMClient:
         # Try fallback models
         if fallback_models is None:
             fallback_models = [
-                "meta-llama/llama-3.2-3b-instruct:free",
-                "mistralai/mistral-7b-instruct:free"
+                "openai/gpt-oss-20b:free",
+                "meta-llama/llama-3.2-3b-instruct:free"
             ]
         
         original_model = self.model_name

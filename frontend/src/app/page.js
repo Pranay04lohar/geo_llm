@@ -75,6 +75,8 @@ import MapView from "@/components/MapView";
 import MiniMap from "@/components/MiniMap";
 import FullScreenMap from "@/components/FullScreenMap";
 import AnalysisResult from "@/components/AnalysisResult";
+import UploadProgress from "@/components/UploadProgress";
+import OCRWarningNotification from "@/components/OCRWarningNotification";
 
 export default function Home() {
   const [leftCollapsed, setLeftCollapsed] = useState(true); // Default to collapsed
@@ -96,6 +98,19 @@ export default function Home() {
   const [showFullScreen, setShowFullScreen] = useState(false);
   const [roiData, setRoiData] = useState([]);
   const [ragMessage, setRagMessage] = useState("");
+
+  // Upload progress tracking
+  const [showUploadProgress, setShowUploadProgress] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({
+    filesUploaded: 0,
+    totalFiles: 0,
+    vectorsCreated: 0,
+    estimatedVectors: 0,
+    sessionId: null,
+  });
+
+  // OCR warning
+  const [showOCRWarning, setShowOCRWarning] = useState(false);
 
   // Load from localStorage after hydration
   useEffect(() => {
@@ -409,18 +424,64 @@ export default function Home() {
     if (!files || files.length === 0) return;
 
     setIsProcessing(true);
+
+    // Initialize progress tracking
+    setUploadProgress({
+      filesUploaded: 0,
+      totalFiles: files.length,
+      vectorsCreated: 0,
+      estimatedVectors: files.length * 50, // Rough estimate: 50 chunks per file
+      sessionId: null,
+    });
+    setShowUploadProgress(true);
+    console.log("🚀 Upload progress started:", { totalFiles: files.length });
+
     try {
+      // Upload files
       const result = await uploadDocsAndGetSession(files);
+
+      // Update progress with actual results
+      setUploadProgress((prev) => ({
+        ...prev,
+        filesUploaded: result.files_processed || files.length,
+        vectorsCreated:
+          result.vectors_created || result.documents_extracted || 0,
+        estimatedVectors:
+          result.vectors_created || result.documents_extracted || 0,
+        sessionId: result.session_id,
+      }));
+      console.log("✅ Upload complete:", {
+        vectors: result.vectors_created,
+        sessionId: result.session_id?.slice(0, 8),
+      });
+
       setRagSessionId(result.session_id);
       setUploadedFiles(files);
+
+      // Show OCR warning if it's in the response
+      if (result.warnings && result.warnings.length > 0) {
+        setShowOCRWarning(true);
+      } else if (!result.ocr_available) {
+        setShowOCRWarning(true);
+      }
+
       setFinalText(
         `Documents uploaded successfully! Session ID: ${result.session_id.slice(
           0,
           8
-        )}... You can now ask questions about the uploaded content.`
+        )}... Created ${
+          result.vectors_created || result.documents_extracted
+        } vector embeddings. You can now ask questions about the uploaded content.`
       );
+
+      // Keep progress visible for 5 seconds to show completion
+      setTimeout(() => {
+        setShowUploadProgress(false);
+        console.log("📊 Upload progress hidden");
+      }, 5000);
     } catch (error) {
       setFinalText(`Upload failed: ${error.message}`);
+      setShowUploadProgress(false);
     } finally {
       setIsProcessing(false);
     }
@@ -435,11 +496,11 @@ export default function Home() {
 
     setIsProcessing(true);
     try {
-      const response = await askRag(query, ragSessionId);
+      const response = await askCoreAgent(query, ragSessionId);
       // Just get the answer - that's all we need!
-      const answer = response?.answer || "No answer received";
+      const answer = response?.analysis || "No answer received";
       setFinalText(answer);
-      console.log("RAG response:", response);
+      console.log("RAG response via Core Agent:", response);
     } catch (error) {
       setFinalText(`RAG query failed: ${error.message}`);
     } finally {
@@ -902,17 +963,15 @@ export default function Home() {
     }
 
     try {
-      const ragResponse = await handleRagQuery(userPrompt);
-      if (ragResponse) {
-        setMessages((prev) => [
-          ...prev,
-          { type: "assistant", content: ragResponse },
-        ]);
-        console.log("RAG response:", ragResponse);
-      } else {
-        // This should not happen due to early return above
-        responseText = "No analysis received";
-      }
+      // Use Core Agent with RAG session ID
+      const response = await askCoreAgent(userPrompt, ragSessionId);
+      const ragResponse = response?.analysis || "No response received";
+
+      setMessages((prev) => [
+        ...prev,
+        { type: "assistant", content: ragResponse },
+      ]);
+      console.log("RAG response via Core Agent:", response);
     } catch (error) {
       console.error("RAG query error:", error);
       setMessages((prev) => [
@@ -1493,16 +1552,19 @@ export default function Home() {
                             let responseText = "";
 
                             if (ragSessionId) {
-                              // Use RAG API for polished LLM responses
-                              const ragResponse = await askRag(
+                              // Use Core Agent with RAG session ID
+                              const ragResponse = await askCoreAgent(
                                 userPrompt,
                                 ragSessionId
                               );
 
                               // Just get the answer - that's all we need!
                               responseText =
-                                ragResponse?.answer || "No answer received";
-                              console.log("RAG response:", ragResponse);
+                                ragResponse?.analysis || "No answer received";
+                              console.log(
+                                "RAG response via Core Agent:",
+                                ragResponse
+                              );
                             } else {
                               // This should not happen due to early return above
                               responseText = "No analysis received";
@@ -1639,6 +1701,25 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Upload Progress Component */}
+      <UploadProgress
+        isVisible={showUploadProgress}
+        filesUploaded={uploadProgress.filesUploaded}
+        totalFiles={uploadProgress.totalFiles}
+        vectorsCreated={uploadProgress.vectorsCreated}
+        estimatedVectors={uploadProgress.estimatedVectors}
+        sessionId={uploadProgress.sessionId}
+        onComplete={() => setShowUploadProgress(false)}
+      />
+
+      {/* OCR Warning Notification */}
+      <OCRWarningNotification
+        isVisible={showOCRWarning}
+        onClose={() => setShowOCRWarning(false)}
+        autoDismiss={true}
+        dismissDelay={10000}
+      />
     </div>
   );
 }

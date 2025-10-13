@@ -89,6 +89,54 @@ class CoreLLMAgent:
             if not query or not query.strip():
                 return self._empty_query_result(time.time() - start_time)
             
+            # Fast path: If RAG session ID is provided, skip location/intent and go straight to RAG
+            if rag_session_id:
+                logger.info(f"RAG session detected ({rag_session_id[:8]}...), bypassing location/intent parsing")
+                logger.info("Dispatching directly to RAG service...")
+                
+                # Create minimal location and intent results for RAG
+                from .models.location import LocationParseResult
+                from .models.intent import IntentResult, ServiceType
+                
+                location_result = LocationParseResult(
+                    success=True,
+                    entities=[],
+                    raw_text=query,
+                    processing_time=0.0
+                )
+                
+                intent_result = IntentResult(
+                    success=True,
+                    service_type=ServiceType.SEARCH,  # Placeholder
+                    confidence=1.0,
+                    reasoning="RAG session active",
+                    processing_time=0.0
+                )
+                
+                # Dispatch directly to RAG
+                service_response = self.service_dispatcher.dispatch(
+                    query, intent_result, location_result, rag_session_id=rag_session_id
+                )
+                
+                # Skip to result formatting
+                total_processing_time = time.time() - start_time
+                logger.info(f"RAG query processed in {total_processing_time:.2f}s")
+                
+                return {
+                    "analysis": service_response.get("analysis", "No response from RAG service"),
+                    "roi": service_response.get("roi"),
+                    "summary": f"Document-based response from RAG service",
+                    "evidence": ["rag:session_active"],
+                    "metadata": {
+                        "processing_time": total_processing_time,
+                        "service": "RAG",
+                        "session_id": rag_session_id
+                    },
+                    "sources": service_response.get("sources", []),
+                    "confidence": service_response.get("confidence", 0.0)
+                }
+            
+            # Normal path: Full pipeline for geospatial queries
             # Step 1: Location Parsing (NER + Geocoding)
             logger.info("Step 1: Parsing locations...")
             location_result = self.location_parser.parse_query(query, resolve_locations=True)
@@ -114,7 +162,7 @@ class CoreLLMAgent:
             service_type_str = intent_result.service_type.value if hasattr(intent_result.service_type, 'value') else str(intent_result.service_type)
             logger.info(f"Step 3: Dispatching to {service_type_str} service...")
             service_response = self.service_dispatcher.dispatch(
-                query, intent_result, location_result, rag_session_id=rag_session_id
+                query, intent_result, location_result, rag_session_id=None
             )
             
             # Step 4: Result Formatting

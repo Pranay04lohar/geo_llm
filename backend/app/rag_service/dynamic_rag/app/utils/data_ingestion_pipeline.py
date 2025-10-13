@@ -1,15 +1,17 @@
 """
 Data Ingestion Pipeline for Dynamic RAG System.
 
-What: Extracts content from PDFs/TXT/DOCX/MD, normalizes tables and OCRs
-      images (graphs) into text, chunks into ~512-token segments with overlap,
-      and attaches metadata.
+What: Extracts text content from PDFs/TXT/DOCX/MD files,
+      chunks into ~512-token segments with overlap, and attaches metadata.
 
 Why:  Convert heterogeneous file inputs into semantically searchable text
       chunks suitable for embedding and retrieval.
 
-How:  Uses pdfplumber for page text, Camelot for tables, pytesseract for OCR,
-      and NLTK sentence/word tokenizers for chunking with configurable size.
+How:  Uses pdfplumber for PDF text extraction, and NLTK sentence/word 
+      tokenizers for chunking with configurable size.
+      
+Note: OCR and advanced table extraction disabled to prevent freezing issues.
+      Basic table text is captured through normal text extraction.
 """
 
 import io
@@ -21,16 +23,16 @@ import re
 
 # PDF processing
 import pdfplumber
-import camelot
-from camelot.core import TableList
+# import camelot  # Disabled - causes freezing issues
+# from camelot.core import TableList
 
 # Document processing
 import docx
 from docx import Document
 
-# Image processing for graphs
-import pytesseract
-from PIL import Image
+# Image processing for graphs (OCR disabled)
+# import pytesseract
+# from PIL import Image
 import fitz  # PyMuPDF
 
 # Text processing
@@ -121,7 +123,7 @@ class DataIngestionPipeline:
             return []
     
     async def _process_pdf(self, filename: str, file_content: bytes) -> List[Document]:
-        """Extract text (pdfplumber), tables (Camelot), and OCR captions from a PDF."""
+        """Extract text and tables from a PDF (OCR disabled)."""
         documents = []
         
         try:
@@ -143,51 +145,55 @@ class DataIngestionPipeline:
                         )
                         documents.extend(text_docs)
                     
-                    # Extract tables using camelot
-                    try:
-                        tables = camelot.read_pdf(
-                            pdf_io, 
-                            pages=str(page_num),
-                            flavor='lattice'
-                        )
-                        
-                        for table_idx, table in enumerate(tables):
-                            table_text = self._table_to_text(table.df)
-                            if table_text:
-                                table_docs = self._chunk_text(
-                                    table_text,
-                                    metadata={
-                                        "filename": filename,
-                                        "page_number": page_num,
-                                        "type": "table",
-                                        "table_index": table_idx
-                                    }
-                                )
-                                documents.extend(table_docs)
-                                
-                    except Exception as e:
-                        logger.warning(f"Table extraction failed for page {page_num}: {str(e)}")
+                    # Extract tables - disabled as it can cause freezing issues
+                    # Camelot requires file paths and can be problematic with BytesIO
+                    # For now, tables within text will be captured by text extraction
+                    # try:
+                    #     tables = camelot.read_pdf(
+                    #         pdf_io, 
+                    #         pages=str(page_num),
+                    #         flavor='lattice'
+                    #     )
+                    #     
+                    #     for table_idx, table in enumerate(tables):
+                    #         table_text = self._table_to_text(table.df)
+                    #         if table_text:
+                    #             table_docs = self._chunk_text(
+                    #                 table_text,
+                    #                 metadata={
+                    #                     "filename": filename,
+                    #                     "page_number": page_num,
+                    #                     "type": "table",
+                    #                     "table_index": table_idx
+                    #                 }
+                    #             )
+                    #             documents.extend(table_docs)
+                    #             
+                    # except Exception as e:
+                    #     logger.warning(f"Table extraction failed for page {page_num}: {str(e)}")
                     
-                    # Extract images/graphs
-                    try:
-                        images = page.images
-                        for img_idx, img in enumerate(images):
-                            # Convert image to text using OCR
-                            img_text = await self._extract_image_text(img, page)
-                            if img_text:
-                                graph_docs = self._chunk_text(
-                                    img_text,
-                                    metadata={
-                                        "filename": filename,
-                                        "page_number": page_num,
-                                        "type": "graph",
-                                        "image_index": img_idx
-                                    }
-                                )
-                                documents.extend(graph_docs)
-                                
-                    except Exception as e:
-                        logger.warning(f"Image extraction failed for page {page_num}: {str(e)}")
+                    # Extract images/graphs (OCR DISABLED - not working)
+                    # OCR functionality has been disabled due to technical issues
+                    # Images and graphs will not be processed
+                    # try:
+                    #     images = page.images
+                    #     for img_idx, img in enumerate(images):
+                    #         # Convert image to text using OCR
+                    #         img_text = await self._extract_image_text(img, page)
+                    #         if img_text:
+                    #             graph_docs = self._chunk_text(
+                    #                 img_text,
+                    #                 metadata={
+                    #                     "filename": filename,
+                    #                     "page_number": page_num,
+                    #                     "type": "graph",
+                    #                     "image_index": img_idx
+                    #                 }
+                    #             )
+                    #             documents.extend(graph_docs)
+                    #             
+                    # except Exception as e:
+                    #     logger.warning(f"Image extraction failed for page {page_num}: {str(e)}")
                         
         except Exception as e:
             logger.error(f"PDF processing failed for {filename}: {str(e)}")
@@ -311,24 +317,25 @@ class DataIngestionPipeline:
             logger.warning(f"Table conversion failed: {str(e)}")
             return ""
     
-    async def _extract_image_text(self, img, page) -> str:
-        """Run Tesseract OCR on a page image region and return text caption."""
-        try:
-            # Get image coordinates and extract
-            bbox = (img['x0'], img['top'], img['x1'], img['bottom'])
-            cropped_page = page.crop(bbox)
-            
-            # Convert to PIL Image
-            img_obj = cropped_page.to_image()
-            pil_image = img_obj.original
-            
-            # Use OCR to extract text
-            text = pytesseract.image_to_string(pil_image)
-            return text.strip()
-            
-        except Exception as e:
-            logger.warning(f"OCR extraction failed: {str(e)}")
-            return ""
+    # OCR functionality disabled - not working
+    # async def _extract_image_text(self, img, page) -> str:
+    #     """Run Tesseract OCR on a page image region and return text caption."""
+    #     try:
+    #         # Get image coordinates and extract
+    #         bbox = (img['x0'], img['top'], img['x1'], img['bottom'])
+    #         cropped_page = page.crop(bbox)
+    #         
+    #         # Convert to PIL Image
+    #         img_obj = cropped_page.to_image()
+    #         pil_image = img_obj.original
+    #         
+    #         # Use OCR to extract text
+    #         text = pytesseract.image_to_string(pil_image)
+    #         return text.strip()
+    #         
+    #     except Exception as e:
+    #         logger.warning(f"OCR extraction failed: {str(e)}")
+    #         return ""
     
     def _chunk_text(self, text: str, metadata: Dict[str, Any]) -> List[Document]:
         """Split text into sentence-aware chunks of ~N tokens with overlap."""

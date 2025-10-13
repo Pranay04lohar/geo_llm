@@ -4,12 +4,14 @@ A comprehensive Retrieval-Augmented Generation (RAG) pipeline designed for proce
 
 ## 🚀 Features
 
-- **Multi-modal PDF Processing**: Extracts text, tables, and graphs from PDF documents
+- **Multi-modal PDF Processing**: Extracts text and tables from PDF documents
 - **GPU-Accelerated Embeddings**: Uses SentenceTransformers with CUDA support for fast embedding generation
-- **Vector Database**: PostgreSQL with pgvector extension for efficient similarity search
-- **Year-based Filtering**: Automatic year extraction from filenames for disaster data organization (1990-2025)
+- **In-Memory Vector Storage**: FAISS-based vector indices with Redis for session management
+- **Session-based Processing**: Ephemeral, per-user sessions with automatic cleanup
 - **RESTful API**: FastAPI-based endpoints for ingestion and retrieval
 - **Async Processing**: High-performance async operations throughout the pipeline
+- **Upload Progress Tracking**: Real-time feedback on document processing status
+- **User Notifications**: Clear warnings about service limitations (e.g., OCR unavailable)
 
 ## 🏗️ Architecture
 
@@ -24,51 +26,47 @@ PDF Files → Text/Table/Graph Extraction → Chunking → Embedding Generation 
 ## 🛠️ Technology Stack
 
 ### Core Technologies
+
 - **FastAPI**: Modern, fast web framework for building APIs
 - **PostgreSQL + pgvector**: Vector database for similarity search
 - **SentenceTransformers**: State-of-the-art sentence embeddings
 - **PyTorch**: Deep learning framework with CUDA support
 
 ### PDF Processing
+
 - **pdfplumber**: PDF text and table extraction
 - **camelot-py**: Advanced table extraction with lattice/stream detection
-- **pytesseract**: OCR for graph/chart text extraction
-- **Pillow**: Image processing for OCR
+- **PyMuPDF**: PDF document handling
+- **Pillow**: Image processing utilities
+- ⚠️ **Note**: OCR functionality (pytesseract) is currently disabled due to technical issues
 
 ### Text Processing
+
 - **LangChain**: Intelligent text chunking with overlap
 - **RecursiveCharacterTextSplitter**: Context-preserving text splitting
 
 ### Database & Async
+
 - **asyncpg**: High-performance async PostgreSQL driver
 - **uvicorn**: ASGI server for FastAPI
 
 ## 📋 Prerequisites
 
 ### System Requirements
+
 - Python 3.8+
 - PostgreSQL 12+ with pgvector extension
 - CUDA-compatible GPU (optional, for faster embeddings)
 - 4GB+ RAM (8GB+ recommended for large datasets)
 
 ### Optional System Dependencies
-- **Tesseract OCR**: For better graph text extraction
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install tesseract-ocr
-  
-  # macOS
-  brew install tesseract
-  
-  # Windows (via Chocolatey)
-  choco install tesseract
-  ```
 
-- **Ghostscript**: For Camelot table extraction
+- **Ghostscript**: For Camelot table extraction (optional, improves table detection)
+
   ```bash
   # Ubuntu/Debian
   sudo apt-get install ghostscript
-  
+
   # macOS
   brew install ghostscript
   ```
@@ -76,12 +74,14 @@ PDF Files → Text/Table/Graph Extraction → Chunking → Embedding Generation 
 ## 🚀 Quick Start
 
 ### 1. Clone the Repository
+
 ```bash
 git clone <repository-url>
 cd RAG_pipeline
 ```
 
 ### 2. Create Virtual Environment
+
 ```bash
 # Windows
 python -m venv .venv
@@ -93,45 +93,49 @@ source .venv/bin/activate
 ```
 
 ### 3. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Database Setup
+### 4. Redis Setup
 
-#### Option A: Using Neon (Cloud PostgreSQL)
-1. Create a Neon account at [neon.tech](https://neon.tech)
-2. Create a new database
-3. Enable pgvector extension in the SQL console:
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS vector;
-   ```
-4. Create environment file:
+This service uses Redis for session management and quota tracking:
+
+#### Option A: Using Docker (Recommended)
+
+```bash
+docker run -d --name redis-rag -p 6379:6379 redis:7-alpine
+```
+
+#### Option B: Local Redis
+
+1. Install Redis on your system
+2. Start Redis server:
    ```bash
-   cp neon.env.example neon.env
-   # Edit neon.env with your Neon credentials
+   redis-server
    ```
 
-#### Option B: Local PostgreSQL
-1. Install PostgreSQL with pgvector
-2. Create database:
-   ```sql
-   CREATE DATABASE rag_db;
-   \c rag_db
-   CREATE EXTENSION IF NOT EXISTS vector;
-   ```
-3. Set environment variables:
-   ```bash
-   export PGHOST=localhost
-   export PGPORT=5432
-   export PGUSER=postgres
-   export PGPASSWORD=your_password
-   export PGDATABASE=rag_db
-   ```
+#### Configuration
+
+Create a `.env` file in the dynamic_rag directory:
+
+```bash
+redis_url=redis://localhost:6379/0
+use_gpu=false
+embedding_model=all-MiniLM-L6-v2
+```
+
+For Redis with password:
+
+```bash
+redis_url=redis://:YOUR_PASSWORD@localhost:6379/0
+```
 
 ### 5. Load Environment Variables
 
 #### Windows PowerShell
+
 ```powershell
 # Load environment variables
 Get-Content .\neon.env | ForEach-Object {
@@ -145,79 +149,124 @@ echo $env:PGHOST; echo $env:PGDATABASE
 ```
 
 #### macOS/Linux
+
 ```bash
 source neon.env
 # or
 export $(cat neon.env | xargs)
 ```
 
-### 6. Run the Application
+### 5. Run the Application
 
-#### Start the API Server
+#### Option A: Using the Startup Script (Recommended)
+
+```bash
+python start_server.py
+```
+
+This script will:
+
+- ✅ Check all required packages
+- ✅ Verify Redis connection
+- ✅ Check GPU availability
+- ✅ Start the server automatically
+
+#### Option B: Manual Start
+
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 #### Access the API Documentation
+
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+- Health Check: http://localhost:8000/health
 
 ## 📖 Usage Examples
 
-### 1. Ingest PDF Documents
+### 1. Upload Documents
 
 #### Via API
+
 ```bash
 # Windows PowerShell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/ingest -Form @{ file = Get-Item "path/to/document.pdf" }
+$form = @{
+    files = Get-Item "path/to/document.pdf"
+    user_id = "default_user"
+}
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/upload-temp -Form $form
 
 # curl
-curl -X POST "http://localhost:8000/ingest" -F "file=@document.pdf"
+curl -X POST "http://localhost:8000/api/v1/upload-temp" \
+  -F "files=@document.pdf" \
+  -F "user_id=default_user"
 ```
 
-#### Via Python Script
-```python
-import asyncio
-from app.utils.data_ingestion_pipeline import parse_pdf_to_documents
-from app.services.rag_store import store_documents
+#### Response Example
 
-async def ingest_pdf(pdf_path):
-    docs = parse_pdf_to_documents(pdf_path)
-    stored = await store_documents(docs)
-    print(f"Stored {stored} chunks from {pdf_path}")
-
-# Run ingestion
-asyncio.run(ingest_pdf("path/to/document.pdf"))
+```json
+{
+  "session_id": "abc123-def456-...",
+  "message": "Successfully processed 1 files and extracted 45 documents",
+  "files_processed": 1,
+  "documents_extracted": 45,
+  "user_quota_remaining": 9,
+  "vectors_created": 45,
+  "ocr_available": false,
+  "warnings": [
+    "OCR is currently unavailable. Images and graphs in PDFs will not be processed."
+  ]
+}
 ```
 
 ### 2. Retrieve Similar Documents
 
-#### Via API
-```bash
-# General search
-$body = @{ query="Kerala floods damage"; k=5 } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/retrieve -Body $body -ContentType "application/json"
+#### Simple Retrieval (Auto-detects session)
 
-# Year-specific search
-$body = @{ query="Cyclone impact"; k=5; year=2019 } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/retrieve -Body $body -ContentType "application/json"
+```bash
+# PowerShell
+$body = @{ query = "What is geospatial analysis?" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/retrieve -Body $body -ContentType "application/json"
+
+# curl
+curl -X POST "http://localhost:8000/api/v1/retrieve" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is geospatial analysis?"}'
 ```
 
-#### Via Python Script
-```python
-import asyncio
-from app.services.rag_store import retrieve_similar_docs
+#### Detailed Retrieval (Specify session)
 
-async def search_documents():
-    # General search
-    results = await retrieve_similar_docs("Kerala floods damage", k=5)
-    print("General results:", results[:2])
-    
-    # Year-specific search
-    results_2019 = await retrieve_similar_docs("Cyclone impact", k=5, year=2019)
-    print("2019 results:", results_2019[:2])
+```bash
+# PowerShell
+$body = @{
+    session_id = "abc123-def456-..."
+    query = "What is geospatial analysis?"
+    k = 5
+    returnVectors = $false
+} | ConvertTo-Json
 
-asyncio.run(search_documents())
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/retrieve/detailed -Body $body -ContentType "application/json"
+```
+
+#### Response Example
+
+```json
+{
+  "session_id": "abc123-def456-...",
+  "query": "What is geospatial analysis?",
+  "k": 5,
+  "results_count": 3,
+  "results": [
+    {
+      "content": "Geospatial analysis refers to...",
+      "metadata": { "filename": "doc.pdf", "page_number": 3 },
+      "similarity_score": 0.8732,
+      "index_id": 12
+    }
+  ],
+  "processing_time_ms": 42.7
+}
 ```
 
 ## 📁 Project Structure
@@ -246,18 +295,19 @@ RAG_pipeline/
 
 ### Environment Variables
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `PGHOST` | PostgreSQL host | localhost | Yes |
-| `PGPORT` | PostgreSQL port | 5432 | Yes |
-| `PGUSER` | Database username | postgres | Yes |
-| `PGPASSWORD` | Database password | postgres | Yes |
-| `PGDATABASE` | Database name | rag_db | Yes |
-| `PGSSLMODE` | SSL mode for secure connections | - | For cloud DBs |
+| Variable     | Description                     | Default   | Required      |
+| ------------ | ------------------------------- | --------- | ------------- |
+| `PGHOST`     | PostgreSQL host                 | localhost | Yes           |
+| `PGPORT`     | PostgreSQL port                 | 5432      | Yes           |
+| `PGUSER`     | Database username               | postgres  | Yes           |
+| `PGPASSWORD` | Database password               | postgres  | Yes           |
+| `PGDATABASE` | Database name                   | rag_db    | Yes           |
+| `PGSSLMODE`  | SSL mode for secure connections | -         | For cloud DBs |
 
 ### Model Configuration
 
 The system uses `sentence-transformers/all-MiniLM-L6-v2` by default, which provides:
+
 - 384-dimensional embeddings
 - Fast inference speed
 - Good semantic similarity performance
@@ -268,11 +318,13 @@ To use a different model, modify `_MODEL_NAME` in `app/utils/embedding_utils.py`
 ## 🚀 Performance Optimization
 
 ### GPU Acceleration
+
 - CUDA is automatically detected and used when available
 - For A100 GPUs, consider increasing batch size in `embed_documents()`
 - Monitor GPU memory usage with large document sets
 
 ### Database Optimization
+
 - Add vector index for faster similarity search:
   ```sql
   CREATE INDEX IF NOT EXISTS idx_documents_embedding
@@ -281,6 +333,7 @@ To use a different model, modify `_MODEL_NAME` in `app/utils/embedding_utils.py`
   ```
 
 ### Memory Management
+
 - Process large PDF collections in batches
 - Use connection pooling for database operations
 - Monitor memory usage during embedding generation
@@ -288,6 +341,7 @@ To use a different model, modify `_MODEL_NAME` in `app/utils/embedding_utils.py`
 ## 🧪 Testing
 
 ### Test Database Connection
+
 ```python
 import asyncio
 import asyncpg
@@ -312,6 +366,7 @@ asyncio.run(test_connection())
 ```
 
 ### Test Embedding Generation
+
 ```python
 import torch
 from app.utils.embedding_utils import embed_query
@@ -325,33 +380,79 @@ embedding = embed_query("test query")
 print("Embedding dimension:", len(embedding))
 ```
 
+## ⚠️ Important Notes
+
+### OCR Functionality
+
+**OCR (Optical Character Recognition) is currently disabled** due to technical issues. This means:
+
+- ✅ **Text content** from PDFs will be extracted normally
+- ✅ **Tables** will be processed and extracted
+- ❌ **Images and graphs** in PDFs will be skipped
+- ⚠️ Users will see a warning notification when uploading files
+
+This is a temporary limitation. When OCR service is restored, it will be automatically re-enabled.
+
+### Session Management
+
+- Sessions are **ephemeral** (stored in-memory with Redis)
+- Default session TTL: **1 hour** of inactivity
+- Sessions automatically cleaned up in background
+- No persistent storage required
+
+### Upload Progress
+
+The frontend now shows:
+
+- Real-time upload progress with percentage
+- Number of vectors/chunks created
+- Processing status messages
+- Automatic completion detection
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **NumPy compatibility error**
+1. **Redis connection failed**
+
+   ```bash
+   # Check if Redis is running
+   redis-cli ping
+   # Should return: PONG
+
+   # Start Redis if not running
+   docker start redis-rag
+   # or
+   redis-server
+   ```
+
+2. **NumPy compatibility error**
+
    ```bash
    pip install "numpy<2"
    ```
 
-2. **CUDA out of memory**
+3. **CUDA out of memory**
+
    - Reduce batch size in `embed_documents()`
    - Process documents in smaller batches
-   - Use CPU mode: set `device="cpu"` in `get_model()`
-
-3. **Database connection failed**
-   - Check environment variables
-   - Verify database is running
-   - Check SSL settings for cloud databases
+   - Use CPU mode: set `use_gpu=false` in `.env`
 
 4. **PDF processing errors**
-   - Install system dependencies (Tesseract, Ghostscript)
+
+   - Install Ghostscript for better table detection (optional)
    - Check PDF file integrity
-   - Try different PDF files
+   - Try simpler PDF files first
+
+5. **Upload progress not showing in frontend**
+   - Verify backend returns `vectors_created` field
+   - Check frontend console for errors
+   - Ensure UploadProgress component is imported
 
 ### Logs and Debugging
 
 Enable debug logging:
+
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -381,6 +482,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Support
 
 For questions, issues, or contributions, please:
+
 1. Check the troubleshooting section above
 2. Search existing issues on GitHub
 3. Create a new issue with detailed information
