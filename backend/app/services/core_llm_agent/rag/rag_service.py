@@ -52,7 +52,7 @@ class RAGService:
     
     def __init__(
         self,
-        rag_service_url: str = "http://localhost:8000",
+        rag_service_url: str = "http://localhost:8001",
         llm_model: Optional[str] = None,
         enable_fallback: bool = True
     ):
@@ -412,7 +412,7 @@ class RAGService:
 
 # Factory function
 def create_rag_service(
-    rag_service_url: str = "http://localhost:8000",
+    rag_service_url: str = "http://localhost:8001",
     llm_model: Optional[str] = None,
     enable_fallback: bool = True
 ) -> RAGService:

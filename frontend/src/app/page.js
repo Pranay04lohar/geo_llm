@@ -11,8 +11,9 @@ import {
 } from "@/utils/api";
 // Simple API functions - no need for separate files
 const RAG_API_BASE = "http://localhost:8002";
-const DYNAMIC_RAG_BASE = "http://localhost:8000";
+const DYNAMIC_RAG_BASE = "http://localhost:8001";
 const CORE_AGENT_API_BASE = "http://localhost:8003";
+const GEE_API_BASE = "http://localhost:8000";
 
 async function uploadDocsAndGetSession(files) {
   const formData = new FormData();
@@ -108,9 +109,13 @@ export default function Home() {
     estimatedVectors: 0,
     sessionId: null,
   });
+  const [hasMounted, setHasMounted] = useState(false);
 
   // OCR warning
   const [showOCRWarning, setShowOCRWarning] = useState(false);
+
+  // Mode switching
+  const [isRagMode, setIsRagMode] = useState(false);
 
   // Load from localStorage after hydration
   useEffect(() => {
@@ -129,6 +134,7 @@ export default function Home() {
     }
 
     setIsHydrated(true);
+    setHasMounted(true);
   }, []);
 
   // Save state to localStorage whenever it changes
@@ -250,7 +256,7 @@ export default function Home() {
       );
 
       // Call backend search service (uses sophisticated NominatimClient)
-      const SEARCH_SERVICE_URL = "http://localhost:8001"; // Search service port
+      const SEARCH_SERVICE_URL = "http://localhost:8004"; // Search service port
 
       const response = await fetch(
         `${SEARCH_SERVICE_URL}/search/location-data`,
@@ -435,6 +441,7 @@ export default function Home() {
     });
     setShowUploadProgress(true);
     console.log("🚀 Upload progress started:", { totalFiles: files.length });
+    console.log("📊 showUploadProgress set to true");
 
     try {
       // Upload files
@@ -457,6 +464,7 @@ export default function Home() {
 
       setRagSessionId(result.session_id);
       setUploadedFiles(files);
+      setIsRagMode(true); // Switch to RAG mode after upload
 
       // Show OCR warning if it's in the response
       if (result.warnings && result.warnings.length > 0) {
@@ -474,11 +482,11 @@ export default function Home() {
         } vector embeddings. You can now ask questions about the uploaded content.`
       );
 
-      // Keep progress visible for 5 seconds to show completion
+      // Keep progress visible for 10 seconds to show completion
       setTimeout(() => {
         setShowUploadProgress(false);
         console.log("📊 Upload progress hidden");
-      }, 5000);
+      }, 10000);
     } catch (error) {
       setFinalText(`Upload failed: ${error.message}`);
       setShowUploadProgress(false);
@@ -915,7 +923,7 @@ export default function Home() {
     setEarthSpeed(0.0005);
 
     // Use real-time COT for geospatial analysis
-    if (!ragSessionId) {
+    if (!isRagMode || !ragSessionId) {
       // For geospatial queries, use real-time COT
       try {
         // First try to get location from the query or use a default
@@ -1327,10 +1335,42 @@ export default function Home() {
             <div className="-ml-3 -mt-8 pb-2">
               <div className="flex justify-center">
                 <div className="w-full max-w-6xl">
+                  {/* Mode Toggle */}
+                  {ragSessionId && (
+                    <div className="flex justify-center mb-4">
+                      <div className="bg-gray-800/90 rounded-2xl p-2 flex items-center gap-2">
+                        <button
+                          onClick={() => setIsRagMode(false)}
+                          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                            !isRagMode
+                              ? "bg-blue-600 text-white"
+                              : "text-gray-400 hover:text-white"
+                          }`}
+                        >
+                          🌍 Geospatial
+                        </button>
+                        <button
+                          onClick={() => setIsRagMode(true)}
+                          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                            isRagMode
+                              ? "bg-green-600 text-white"
+                              : "text-gray-400 hover:text-white"
+                          }`}
+                        >
+                          📄 Document
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="relative bg-black/70 rounded-3xl p-4 shadow-xl backdrop-blur-md border border-gray-800/60">
                     <textarea
                       id="prompt-input"
-                      placeholder="Ask anything about geography, boundaries, or spatial data..."
+                      placeholder={
+                        isRagMode && ragSessionId
+                          ? "Ask questions about your uploaded documents..."
+                          : "Ask anything about geography, boundaries, or spatial data..."
+                      }
                       aria-label="Prompt input"
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
@@ -1377,30 +1417,8 @@ export default function Home() {
                             try {
                               if (isRag) {
                                 const selected = files.slice(0, 2);
-                                // Use new RAG upload function
-                                const res = await uploadDocsAndGetSession(
-                                  selected
-                                );
-                                setRagSessionId(res.session_id);
-                                setUploadedFiles(selected);
-                                setRagMessage(
-                                  `Uploaded ${
-                                    selected.length
-                                  } files to session ${res.session_id.slice(
-                                    0,
-                                    8
-                                  )}...`
-                                );
-                                if (typeof window !== "undefined") {
-                                  localStorage.setItem(
-                                    "rag_session_id",
-                                    res.session_id
-                                  );
-                                }
-                                // Update finalText to show upload success
-                                setFinalText(
-                                  `Documents uploaded successfully! You can now ask questions about the uploaded content.`
-                                );
+                                // Use handleFileUpload to trigger progress bar
+                                await handleFileUpload(selected);
                               } else {
                                 const file = files[0];
                                 const name = file.name.toLowerCase();
@@ -1703,23 +1721,27 @@ export default function Home() {
       </div>
 
       {/* Upload Progress Component */}
-      <UploadProgress
-        isVisible={showUploadProgress}
-        filesUploaded={uploadProgress.filesUploaded}
-        totalFiles={uploadProgress.totalFiles}
-        vectorsCreated={uploadProgress.vectorsCreated}
-        estimatedVectors={uploadProgress.estimatedVectors}
-        sessionId={uploadProgress.sessionId}
-        onComplete={() => setShowUploadProgress(false)}
-      />
+      {hasMounted && (
+        <UploadProgress
+          isVisible={showUploadProgress}
+          filesUploaded={uploadProgress.filesUploaded}
+          totalFiles={uploadProgress.totalFiles}
+          vectorsCreated={uploadProgress.vectorsCreated}
+          estimatedVectors={uploadProgress.estimatedVectors}
+          sessionId={uploadProgress.sessionId}
+          onComplete={() => setShowUploadProgress(false)}
+        />
+      )}
 
       {/* OCR Warning Notification */}
-      <OCRWarningNotification
-        isVisible={showOCRWarning}
-        onClose={() => setShowOCRWarning(false)}
-        autoDismiss={true}
-        dismissDelay={10000}
-      />
+      {hasMounted && (
+        <OCRWarningNotification
+          isVisible={showOCRWarning}
+          onClose={() => setShowOCRWarning(false)}
+          autoDismiss={true}
+          dismissDelay={10000}
+        />
+      )}
     </div>
   );
 }

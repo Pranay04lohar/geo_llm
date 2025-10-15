@@ -26,6 +26,13 @@ export default function UploadProgress({
 
   useEffect(() => {
     console.log("📊 UploadProgress visibility changed:", isVisible);
+    console.log("📊 UploadProgress props:", {
+      isVisible,
+      filesUploaded,
+      totalFiles,
+      vectorsCreated,
+      estimatedVectors,
+    });
     if (!isVisible) {
       setProgress(0);
       setStatus("Uploading files...");
@@ -67,11 +74,12 @@ export default function UploadProgress({
   return (
     <AnimatePresence>
       <motion.div
+        key="upload-progress"
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -50 }}
-        className="fixed bottom-8 right-8 z-50 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden"
-        style={{ width: "400px", maxWidth: "90vw" }}
+        className="fixed bottom-8 right-8 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden"
+        style={{ width: "400px", maxWidth: "90vw", zIndex: 99999 }}
       >
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4">

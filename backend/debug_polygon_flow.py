@@ -71,7 +71,7 @@ def test_polygon_flow():
     print("\n2️⃣ TESTING SEARCH API SERVICE ENDPOINT")
     try:
         response = requests.post(
-            "http://localhost:8001/search/location-data",
+            "http://localhost:8004/search/location-data",
             json={
                 "location_name": "Jaipur",
                 "location_type": "city"

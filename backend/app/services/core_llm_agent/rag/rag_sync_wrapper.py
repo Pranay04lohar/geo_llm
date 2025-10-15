@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class SyncRAGService:
     """Synchronous wrapper for the async RAG service."""
     
-    def __init__(self, rag_service_url: str = "http://localhost:8000"):
+    def __init__(self, rag_service_url: str = "http://localhost:8001"):
         """Initialize the synchronous RAG service wrapper.
         
         Args:
@@ -268,7 +268,7 @@ class SyncRAGService:
 
 
 # Factory function
-def create_sync_rag_service(rag_service_url: str = "http://localhost:8000") -> SyncRAGService:
+def create_sync_rag_service(rag_service_url: str = "http://localhost:8001") -> SyncRAGService:
     """Create a synchronous RAG service wrapper.
     
     Args:

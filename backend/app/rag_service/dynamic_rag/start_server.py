@@ -91,8 +91,8 @@ def main():
     
     # Start server
     print("\n🌐 Starting FastAPI server...")
-    print("📖 API Documentation: http://localhost:8000/docs")
-    print("🔍 Health Check: http://localhost:8000/health")
+    print("📖 API Documentation: http://localhost:8001/docs")
+    print("🔍 Health Check: http://localhost:8001/health")
     print("⏹️  Press Ctrl+C to stop")
     print("-" * 40)
     
@@ -102,7 +102,7 @@ def main():
             sys.executable, "-m", "uvicorn",
             "app.main:app",
             "--host", "0.0.0.0",
-            "--port", "8000",
+            "--port", "8001",
             "--reload"
         ])
     except KeyboardInterrupt:

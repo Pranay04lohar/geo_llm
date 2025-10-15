@@ -15,7 +15,7 @@ def test_search_api_endpoint():
     try:
         # Test the Search API service endpoint
         response = requests.post(
-            "http://localhost:8001/search/location-data",
+            "http://localhost:8004/search/location-data",
             json={
                 "location_name": "Bikaner",
                 "location_type": "city"

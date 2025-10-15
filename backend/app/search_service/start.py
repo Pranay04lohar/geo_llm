@@ -1,7 +1,7 @@
 """
 Search API Service Launcher
 
-This script starts the Search API Service on port 8001.
+This script starts the Search API Service on port 8004.
 """
 
 import uvicorn
@@ -23,9 +23,9 @@ sys.path.insert(0, str(current_dir))
 def main():
     """Start the Search API Service."""
     print("🚀 Starting Search API Service...")
-    print("📍 Service will be available at: http://localhost:8001")
-    print("📚 API Documentation: http://localhost:8001/docs")
-    print("🔍 Health Check: http://localhost:8001/health")
+    print("📍 Service will be available at: http://localhost:8004")
+    print("📚 API Documentation: http://localhost:8004/docs")
+    print("🔍 Health Check: http://localhost:8004/health")
     print("=" * 60)
     
     # Check for required environment variables
@@ -38,7 +38,7 @@ def main():
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8001,
+        port=8004,
         reload=True,
         log_level="info"
     )

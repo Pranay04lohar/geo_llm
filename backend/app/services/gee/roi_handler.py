@@ -64,7 +64,7 @@ class ROIHandler:
     def __init__(self):
         """Initialize ROI handler with geocoding setup."""
         self.geocoder = None
-        self.search_api_url = "http://localhost:8001"  # Search API Service URL (legacy)
+        self.search_api_url = "http://localhost:8004"  # Search API Service URL (legacy)
         
         # Prefer in-process Nominatim client from search_service to avoid HTTP and import issues
         try:

@@ -38,11 +38,13 @@ export default function OCRWarningNotification({
     <AnimatePresence>
       {show && (
         <motion.div
+          key="ocr-warning"
           initial={{ opacity: 0, x: 300 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 300 }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="fixed top-8 right-8 z-50 max-w-md"
+          className="fixed top-8 right-8 max-w-md"
+          style={{ zIndex: 99999 }}
         >
           <div className="bg-white rounded-lg shadow-2xl border-l-4 border-yellow-500 overflow-hidden">
             {/* Header */}

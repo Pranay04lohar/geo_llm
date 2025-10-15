@@ -33,7 +33,7 @@ class RetrievedChunk:
 class RAGServiceClient:
     """Client for interacting with the dynamic RAG service."""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:8001"):
         """Initialize RAG service client.
         
         Args:
@@ -180,7 +180,7 @@ class RAGServiceClient:
 
 
 # Factory function for easy instantiation
-def create_rag_client(base_url: str = "http://localhost:8000") -> RAGServiceClient:
+def create_rag_client(base_url: str = "http://localhost:8001") -> RAGServiceClient:
     """Create a RAG service client instance.
     
     Args:

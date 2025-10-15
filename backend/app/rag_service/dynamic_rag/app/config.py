@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # File Upload Settings
     max_file_size_mb: int = 100
     max_files_per_request: int = 2
-    max_files_per_user_per_day: int = 10
+    max_files_per_user_per_day: int = 20
     
     # Session Management
     session_ttl_hours: int = 1
