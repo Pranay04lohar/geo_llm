@@ -173,7 +173,7 @@ class SimpleStepProcessor:
                 
                 # Use roi directly as geometry (same as static COT)
                 response = requests.post(
-                    "http://localhost:8000/lst/land-surface-temperature",
+                    f"{os.getenv('SERVICE_BASE_URL', 'http://localhost:8000')}/lst/land-surface-temperature",
                     json={
                         "geometry": roi,
                         "startDate": "2023-06-01",
@@ -278,7 +278,7 @@ class SimpleStepProcessor:
                 
                 # Use roi directly as geometry (same as static COT)
                 response = requests.post(
-                    "http://localhost:8000/ndvi/vegetation-analysis",
+                    f"{os.getenv('SERVICE_BASE_URL', 'http://localhost:8000')}/ndvi/vegetation-analysis",
                     json={
                         "geometry": roi,
                         "startDate": "2023-06-01",

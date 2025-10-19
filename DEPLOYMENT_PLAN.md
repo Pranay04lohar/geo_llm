@@ -210,7 +210,10 @@ Frontend (Next.js) → Backend Gateway (FastAPI) → Microservices
    - **Name**: `DATABASE_URL`, **Value**: `postgresql://geollmadmin:GeoLLM2025!@geollm-postgres.postgres.database.azure.com:5432/postgres`
    - **Name**: `GOOGLE_APPLICATION_CREDENTIALS`, **Value**: `/home/site/wwwroot/credentials.json`
    - **Name**: `ALLOWED_ORIGINS`, **Value**: `https://your-frontend.vercel.app,https://your-custom-domain.com`
+   - **Name**: `SERVICE_BASE_URL`, **Value**: `https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net` (your Azure app URL)
 3. Click "Save"
+
+**Note**: `SERVICE_BASE_URL` is used for internal service communication in the monolithic deployment. All microservices (GEE, Search, RAG, Core Agent) are integrated into the main app and communicate via this URL.
 
 #### **Step 7: Prepare Backend for Azure**
 

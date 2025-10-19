@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 class SearchServiceClient:
     """Client for calling Search API Service from core LLM agent."""
     
-    def __init__(self, base_url: str = "http://localhost:8001"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None):
+        import os
+        self.base_url = base_url or os.getenv("SERVICE_BASE_URL", "http://localhost:8000")
         self.timeout = 60  # Increased timeout for enhanced analysis
     
     def get_location_data(

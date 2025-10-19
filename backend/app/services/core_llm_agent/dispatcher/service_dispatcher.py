@@ -285,9 +285,13 @@ class ServiceDispatcher:
         import requests
         
         try:
+            # Get base service URL from config
+            from app.config_urls import get_service_url
+            base_url = get_service_url()
+            
             # Determine service endpoint
             if analysis_type == "ndvi":
-                url = "http://localhost:8000/ndvi/vegetation-analysis"
+                url = f"{base_url}/ndvi/vegetation-analysis"
                 payload = {
                     "geometry": roi_info["geometry"],
                     "startDate": "2023-06-01",
@@ -299,7 +303,7 @@ class ServiceDispatcher:
                     "exactComputation": False
                 }
             elif analysis_type == "lst":
-                url = "http://localhost:8000/lst/land-surface-temperature"
+                url = f"{base_url}/lst/land-surface-temperature"
                 payload = {
                     "geometry": roi_info["geometry"],
                     "startDate": "2024-01-01",
@@ -311,7 +315,7 @@ class ServiceDispatcher:
                     "exactComputation": False
                 }
             elif analysis_type == "water":
-                url = "http://localhost:8000/water/analyze"
+                url = f"{base_url}/water/analyze"
                 payload = {
                     "roi": roi_info["geometry"],
                     "year": 2023,
@@ -319,7 +323,7 @@ class ServiceDispatcher:
                     "include_seasonal": True
                 }
             elif analysis_type == "lulc":
-                url = "http://localhost:8000/lulc/dynamic-world"
+                url = f"{base_url}/lulc/dynamic-world"
                 payload = {
                     "geometry": roi_info["geometry"],
                     "startDate": "2023-01-01",
@@ -331,7 +335,7 @@ class ServiceDispatcher:
                     "includeMedianVis": False
                 }
             else:  # Default to LULC
-                url = "http://localhost:8000/lulc/dynamic-world"
+                url = f"{base_url}/lulc/dynamic-world"
                 payload = {
                     "geometry": roi_info["geometry"],
                     "startDate": "2023-01-01",
