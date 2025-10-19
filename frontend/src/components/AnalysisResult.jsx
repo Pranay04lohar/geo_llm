@@ -7,6 +7,10 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { FaExpand, FaEye, FaEyeSlash } from "react-icons/fa";
 import FullScreenMap from "./FullScreenMap";
 
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net";
+
 // Debounce utility
 function debounce(func, wait) {
   let timeout;
@@ -437,10 +441,10 @@ export default function AnalysisResult({ content }) {
             // Fallback to API sampling if grid not loaded or point not in grid
             const sampleEndpoint =
               analysisType === "lst"
-                ? "http://localhost:8000/lst/sample"
+                ? `${API_BASE}/lst/sample`
                 : analysisType === "ndvi"
-                ? "http://localhost:8000/ndvi/sample"
-                : "http://localhost:8000/water/sample";
+                ? `${API_BASE}/ndvi/sample`
+                : `${API_BASE}/water/sample`;
 
             console.log(
               `Fetching ${analysisType.toUpperCase()} sample from backend...`
@@ -668,8 +672,8 @@ export default function AnalysisResult({ content }) {
           try {
             const clickEndpoint =
               analysisType === "lst"
-                ? "http://localhost:8000/lst/sample"
-                : "http://localhost:8000/ndvi/sample";
+                ? `${API_BASE}/lst/sample`
+                : `${API_BASE}/ndvi/sample`;
 
             const resp = await fetch(clickEndpoint, {
               method: "POST",
@@ -737,8 +741,8 @@ export default function AnalysisResult({ content }) {
       ) {
         const gridEndpoint =
           analysisTypeForGrid === "lst"
-            ? "http://localhost:8000/lst/grid"
-            : "http://localhost:8000/ndvi/grid";
+            ? `${API_BASE}/lst/grid`
+            : `${API_BASE}/ndvi/grid`;
 
         console.log(
           `🔷 Loading ${analysisTypeForGrid.toUpperCase()} vector grid for fast hover (with 15s timeout)...`

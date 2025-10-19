@@ -11,6 +11,10 @@ import {
   FaCompass,
 } from "react-icons/fa";
 
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net";
+
 // Debounce utility
 function debounce(func, wait) {
   let timeout;
@@ -66,7 +70,7 @@ function FullScreenMap({ roiData, analysisData, onClose, onExport }) {
         return lstCacheRef.current.get(key);
       }
 
-      const resp = await fetch("http://localhost:8000/lst/sample", {
+      const resp = await fetch(`${API_BASE}/lst/sample`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -95,7 +99,7 @@ function FullScreenMap({ roiData, analysisData, onClose, onExport }) {
       const key = keyFromLngLat(lng, lat);
       if (ndviCacheRef.current.has(key)) return ndviCacheRef.current.get(key);
 
-      const resp = await fetch("http://localhost:8000/ndvi/sample", {
+      const resp = await fetch(`${API_BASE}/ndvi/sample`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -773,7 +777,7 @@ function FullScreenMap({ roiData, analysisData, onClose, onExport }) {
         const roiGeometry =
           analysisData.roi_geojson.geometry || analysisData.roi_geojson;
 
-        fetch("http://localhost:8000/ndvi/grid", {
+        fetch(`${API_BASE}/ndvi/grid`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

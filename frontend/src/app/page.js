@@ -10,10 +10,13 @@ import {
   getLastDetailed as ragGetLastDetailed,
 } from "@/utils/api";
 // Simple API functions - no need for separate files
-const RAG_API_BASE = "http://localhost:8002";
-const DYNAMIC_RAG_BASE = "http://localhost:8001";
-const CORE_AGENT_API_BASE = "http://localhost:8003";
-const GEE_API_BASE = "http://localhost:8000";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net";
+const RAG_API_BASE = API_BASE;
+const DYNAMIC_RAG_BASE = API_BASE;
+const CORE_AGENT_API_BASE = API_BASE;
+const GEE_API_BASE = API_BASE;
 
 async function uploadDocsAndGetSession(files) {
   const formData = new FormData();
@@ -256,7 +259,7 @@ export default function Home() {
       );
 
       // Call backend search service (uses sophisticated NominatimClient)
-      const SEARCH_SERVICE_URL = "http://localhost:8004"; // Search service port
+      const SEARCH_SERVICE_URL = API_BASE;
 
       const response = await fetch(
         `${SEARCH_SERVICE_URL}/search/location-data`,
@@ -567,7 +570,7 @@ export default function Home() {
     }, 180000); // 3 minute timeout for geospatial analysis
 
     try {
-      const response = await fetch("http://localhost:8003/cot-stream", {
+      const response = await fetch(`${CORE_AGENT_API_BASE}/cot-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
