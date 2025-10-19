@@ -209,6 +209,7 @@ Frontend (Next.js) → Backend Gateway (FastAPI) → Microservices
    - **Name**: `TAVILY_API_KEY`, **Value**: `your-tavily-api-key`
    - **Name**: `DATABASE_URL`, **Value**: `postgresql://geollmadmin:GeoLLM2025!@geollm-postgres.postgres.database.azure.com:5432/postgres`
    - **Name**: `GOOGLE_APPLICATION_CREDENTIALS`, **Value**: `/home/site/wwwroot/credentials.json`
+   - **Name**: `ALLOWED_ORIGINS`, **Value**: `https://your-frontend.vercel.app,https://your-custom-domain.com`
 3. Click "Save"
 
 #### **Step 7: Prepare Backend for Azure**
@@ -226,7 +227,7 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
 ```
 
-**Create `requirements.txt` in backend directory:**
+**Create/update `requirements.txt` (root or backend/) to include:**
 
 ```txt
 fastapi==0.116.1
@@ -236,10 +237,6 @@ rapidfuzz
 langgraph==0.0.39
 requests==2.31.0
 python-dotenv==1.0.1
-sentence-transformers
-faiss-cpu
-redis
-psycopg2-binary
 ```
 
 **Create `web.config` in backend directory:**
@@ -260,7 +257,15 @@ psycopg2-binary
 </configuration>
 ```
 
-#### **Step 8: Deploy Code via Azure Portal**
+#### **Step 8: Set Startup Command (Linux App Service)**
+
+Set Startup Command to:
+
+```
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
+
+#### **Step 9: Deploy Code via Azure Portal**
 
 1. Go to your Web App → "Deployment Center"
 2. **Source**: Choose "Local Git" or "GitHub"
@@ -280,7 +285,7 @@ psycopg2-binary
    - Select the branch (main/master)
    - Azure will automatically deploy
 
-#### **Step 9: Test Deployment**
+#### **Step 10: Test Deployment**
 
 1. Go to your Web App → "Overview"
 2. Copy the **URL** (e.g., `https://geollm-backend.azurewebsites.net`)
