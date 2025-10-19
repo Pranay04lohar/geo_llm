@@ -30,50 +30,31 @@ Frontend (Next.js) → Backend Gateway (FastAPI) → Microservices
 4. **Search Service** - Geocoding and web search fallback
 5. **Core LLM Agent** - Orchestrates all services
 
-## 🚀 Deployment Strategy Options
+## 🚀 FINALIZED DEPLOYMENT STRATEGY
 
-### Option 1: Cloud-Native Microservices (Recommended)
+### **Azure App Service + Vercel (Recommended)**
 
-#### **Infrastructure: AWS/GCP/Azure**
+#### **Frontend: Vercel**
 
-**Frontend Deployment:**
+- **Platform**: Vercel (Next.js optimized)
+- **Cost**: FREE
+- **Features**: Automatic HTTPS, Global CDN, Serverless functions
+- **Domain**: Free .vercel.app domain + custom domain support
 
-- **Platform**: Vercel (Next.js optimized) or AWS Amplify
-- **CDN**: CloudFront/CloudFlare for global distribution
-- **Environment**: Production build with optimized assets
+#### **Backend: Azure App Service**
 
-**Backend Deployment:**
+- **Platform**: Azure App Service (Python)
+- **Cost**: ~$13-20/month (uses your $200 credits)
+- **Features**: 1GB+ memory, auto-scaling, managed service
+- **Database**: Azure Database for PostgreSQL
 
-- **Container Orchestration**: AWS ECS + Fargate or Google Cloud Run
-- **API Gateway**: AWS API Gateway or Google Cloud Endpoints
-- **Load Balancing**: Application Load Balancer
-- **Auto-scaling**: Based on CPU/memory usage
+#### **Why This Combination:**
 
-**Database:**
-
-- **Primary**: AWS RDS PostgreSQL with pgvector extension
-- **Vector Storage**: Pinecone or Weaviate (managed vector DB)
-- **Caching**: Redis/ElastiCache for session management
-
-**External Services:**
-
-- **Google Earth Engine**: Direct API integration
-- **LLM APIs**: OpenRouter, Anthropic, OpenAI
-- **Search APIs**: Nominatim, Tavily
-
-#### **Pros:**
-
-- ✅ Highly scalable and fault-tolerant
-- ✅ Managed services reduce operational overhead
-- ✅ Pay-per-use pricing model
-- ✅ Built-in monitoring and logging
-- ✅ Easy CI/CD integration
-
-#### **Cons:**
-
-- ❌ Higher complexity for initial setup
-- ❌ Vendor lock-in
-- ❌ Learning curve for cloud services
+- ✅ **Easy deployment** - no Docker knowledge needed
+- ✅ **Cost effective** - uses your Azure credits
+- ✅ **Sufficient memory** for Sentence Transformers
+- ✅ **No size limits** like Vercel serverless
+- ✅ **Professional setup** - production ready
 
 ---
 
@@ -171,69 +152,169 @@ Frontend (Next.js) → Backend Gateway (FastAPI) → Microservices
 
 ---
 
-## 📋 Detailed Deployment Steps
+## 📋 STEP-BY-STEP DEPLOYMENT GUIDE
 
-### Phase 1: Infrastructure Setup
+### **PHASE 1: Azure Backend Setup (Azure Portal)**
 
-#### **1.1 Cloud Account Setup**
+#### **Step 1: Access Azure Portal**
 
-- [ ] Create Google Cloud/AWS account
-- [ ] Set up billing and budget alerts
-- [ ] Configure IAM roles and permissions
-- [ ] Enable required APIs (Cloud Run, SQL, etc.)
+1. Go to https://portal.azure.com
+2. Sign in with your Microsoft account
+3. Make sure you're using the subscription with your $200 credits
 
-#### **1.2 Database Setup**
+#### **Step 2: Create Resource Group**
 
-- [ ] Create PostgreSQL instance with pgvector extension
-- [ ] Configure database users and permissions
-- [ ] Set up automated backups
-- [ ] Create initial database schema
+1. Click "Create a resource" → "Resource group"
+2. **Resource group name**: `geollm-rg`
+3. **Region**: `East US`
+4. Click "Review + create" → "Create"
 
-#### **1.3 Container Registry**
+#### **Step 3: Create App Service Plan**
 
-- [ ] Set up Google Container Registry or AWS ECR
-- [ ] Configure authentication
-- [ ] Set up image scanning and security policies
+1. Click "Create a resource" → "App Service Plan"
+2. **Resource group**: Select `geollm-rg`
+3. **Name**: `geollm-plan`
+4. **Operating System**: `Linux`
+5. **Region**: `East US`
+6. **Pricing tier**: `Basic B1` ($13.14/month)
+7. Click "Review + create" → "Create"
 
-### Phase 2: Backend Deployment
+#### **Step 4: Create PostgreSQL Database**
 
-#### **2.1 Service Containerization**
+1. Click "Create a resource" → "Azure Database for PostgreSQL"
+2. **Resource group**: Select `geollm-rg`
+3. **Server name**: `geollm-postgres`
+4. **Admin username**: `geollmadmin`
+5. **Password**: `@PostgresDB`
+6. **Region**: `East US`
+7. **Compute + storage**: `Basic, 1 vCore, 32 GB storage`
+8. Click "Review + create" → "Create"
 
-- [ ] Create Dockerfile for each service
-- [ ] Optimize container images (multi-stage builds)
-- [ ] Set up health checks and readiness probes
-- [ ] Configure environment variables
+#### **Step 5: Create Web App**
 
-#### **2.2 Service Deployment**
+1. Click "Create a resource" → "Web App"
+2. **Resource group**: Select `geollm-rg`
+3. **Name**: `geollm-backend` (must be globally unique)
+4. **Runtime stack**: `Python 3.11`
+5. **Operating System**: `Linux`
+6. **Region**: `East US`
+7. **App Service Plan**: Select `geollm-plan`
+8. Click "Review + create" → "Create"
 
-- [ ] Deploy GEE Service to Cloud Run
-- [ ] Deploy RAG Service to Cloud Run
-- [ ] Deploy Search Service to Cloud Run
-- [ ] Deploy Core LLM Agent to Cloud Run
-- [ ] Deploy Main API Gateway to Cloud Run
+#### **Step 6: Configure App Settings**
 
-#### **2.3 Service Configuration**
+1. Go to your Web App → "Configuration" → "Application settings"
+2. Click "New application setting" and add:
+   - **Name**: `OPENROUTER_API_KEY`, **Value**: `your-openrouter-api-key`
+   - **Name**: `TAVILY_API_KEY`, **Value**: `your-tavily-api-key`
+   - **Name**: `DATABASE_URL`, **Value**: `postgresql://geollmadmin:GeoLLM2025!@geollm-postgres.postgres.database.azure.com:5432/postgres`
+   - **Name**: `GOOGLE_APPLICATION_CREDENTIALS`, **Value**: `/home/site/wwwroot/credentials.json`
+3. Click "Save"
 
-- [ ] Configure service-to-service communication
-- [ ] Set up API Gateway routing
-- [ ] Configure CORS and security headers
-- [ ] Set up request/response logging
+#### **Step 7: Prepare Backend for Azure**
 
-### Phase 3: Frontend Deployment
+**Create `startup.py` in backend directory:**
 
-#### **3.1 Build Optimization**
+```python
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-- [ ] Optimize Next.js build configuration
-- [ ] Configure environment variables
-- [ ] Set up static asset optimization
-- [ ] Configure API endpoints
+from app.main import app
 
-#### **3.2 Deployment**
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+```
 
-- [ ] Deploy to Vercel or AWS Amplify
-- [ ] Configure custom domain
-- [ ] Set up SSL certificates
-- [ ] Configure CDN settings
+**Create `requirements.txt` in backend directory:**
+
+```txt
+fastapi==0.116.1
+uvicorn==0.35.0
+pydantic==2.11.7
+rapidfuzz
+langgraph==0.0.39
+requests==2.31.0
+python-dotenv==1.0.1
+sentence-transformers
+faiss-cpu
+redis
+psycopg2-binary
+```
+
+**Create `web.config` in backend directory:**
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <handlers>
+      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
+    </handlers>
+    <httpPlatform processPath="D:\home\Python311\python.exe" arguments="D:\home\site\wwwroot\startup.py" stdoutLogEnabled="true" stdoutLogFile="D:\home\LogFiles\python.log" startupTimeLimit="60" startupRetryCount="3">
+      <environmentVariables>
+        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>
+      </environmentVariables>
+    </httpPlatform>
+  </system.webServer>
+</configuration>
+```
+
+#### **Step 8: Deploy Code via Azure Portal**
+
+1. Go to your Web App → "Deployment Center"
+2. **Source**: Choose "Local Git" or "GitHub"
+3. **If using Local Git**:
+   - Copy the Git clone URL
+   - In your backend directory, run:
+     ```bash
+     git init
+     git add .
+     git commit -m "Initial commit"
+     git remote add azure <your-git-url>
+     git push azure main
+     ```
+4. **If using GitHub**:
+   - Connect your GitHub account
+   - Select your repository
+   - Select the branch (main/master)
+   - Azure will automatically deploy
+
+#### **Step 9: Test Deployment**
+
+1. Go to your Web App → "Overview"
+2. Copy the **URL** (e.g., `https://geollm-backend.azurewebsites.net`)
+3. Open the URL in your browser
+4. You should see: `{"message": "Welcome to the GeoSpatial LLM API"}`
+
+### **PHASE 2: Vercel Frontend Setup**
+
+#### **Step 1: Install Vercel CLI**
+
+```bash
+npm install -g vercel
+```
+
+#### **Step 2: Login to Vercel**
+
+```bash
+vercel login
+```
+
+#### **Step 3: Configure Environment Variables**
+
+Create `.env.local` in frontend directory:
+
+```env
+NEXT_PUBLIC_API_URL=https://geollm-backend.azurewebsites.net
+```
+
+#### **Step 4: Deploy to Vercel**
+
+```bash
+cd frontend
+vercel --prod
+```
 
 ### Phase 4: Integration & Testing
 
