@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Query
-from app.routers import query_router
-from app.services.roi_parser import roi_parser
+from .routers import query_router
+from .services.roi_parser import roi_parser
 
 app = FastAPI(
     title="GeoLLM MVP",
