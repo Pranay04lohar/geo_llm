@@ -1,7 +1,7 @@
 # routers are used to handle the requests and responses from the frontend
 
 from fastapi import APIRouter
-from app.models import QueryRequest, QueryResponse
+from ..models import QueryRequest, QueryResponse
 
 router = APIRouter()
 
