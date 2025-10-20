@@ -10,13 +10,17 @@ app = FastAPI(
     version="0.1"
 )
 
-# CORS configuration: read allowed origins from environment (comma-separated)
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
-allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()] or ["*"]
+# CORS configuration: read allowed origins or regex from environment
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
+# Optional regex to allow dynamic preview domains (e.g., Vercel previews)
+allowed_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
