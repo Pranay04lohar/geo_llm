@@ -1,0 +1,48 @@
+# Minimal requirements for initial deployment (without RAG service)
+# This gets your core functionality working faster
+
+# Core FastAPI
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+python-dotenv==1.0.1
+python-multipart
+gunicorn
+
+# LLM and Agent
+langgraph==0.0.39
+rapidfuzz
+
+# HTTP and Networking
+requests==2.31.0
+aiohttp==3.9.1
+httpx
+
+# Search Service Dependencies
+shapely==2.0.2
+pyproj==3.6.1
+numpy<2.0
+
+# GEE Service Dependencies
+earthengine-api==0.1.381
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+
+# Utilities
+Pillow
+
+# RAG dependencies commented out for now (add later after basic deployment works)
+# sentence-transformers
+# transformers
+# faiss-cpu
+# torch
+# pdfplumber
+# python-docx
+# PyMuPDF
+# nltk
+# regex
+# redis
+# aioredis
+# pydantic-settings
+
+
