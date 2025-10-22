@@ -25,10 +25,10 @@ env_path = backend_dir / ".env"
 load_dotenv(env_path)
 
 # Import our services
-from services.nominatim_client import NominatimClient
-from services.tavily_client import TavilyClient
-from services.location_resolver import LocationResolver
-from services.result_processor import ResultProcessor
+from .services.nominatim_client import NominatimClient
+from .services.tavily_client import TavilyClient
+from .services.location_resolver import LocationResolver
+from .services.result_processor import ResultProcessor
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -445,13 +445,13 @@ env_path = backend_dir / ".env"
 load_dotenv(env_path)
 
 # Import our services
-from services.tavily_client import TavilyClient
-from services.location_resolver import LocationResolver
-from services.result_processor import ResultProcessor
-from services.enhanced_result_processor import EnhancedResultProcessor
+from .services.tavily_client import TavilyClient
+from .services.location_resolver import LocationResolver
+from .services.result_processor import ResultProcessor
+from .services.enhanced_result_processor import EnhancedResultProcessor
 
 # Import the models
-from models import (
+from .models import (
     LocationRequest, EnvironmentalContextRequest, CompleteAnalysisRequest,
     LocationResponse, EnvironmentalContextResponse, CompleteAnalysisResponse,
     Coordinates, AdministrativeInfo, SourceInfo

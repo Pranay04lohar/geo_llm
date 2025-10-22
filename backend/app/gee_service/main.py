@@ -221,12 +221,12 @@ async def root():
 
 # Import services
 try:
-    from services.lulc_service import LULCService
+    from .services.lulc_service import LULCService
     logger.info("✅ Successfully imported LULCService")
     
     # Try to import NDVIService with detailed error logging
     try:
-        from services.ndvi_service import NDVIService
+        from .services.ndvi_service import NDVIService
         logger.info("✅ Successfully imported NDVIService")
     except Exception as ndvi_import_error:
         logger.error(f"❌ Failed to import NDVIService: {ndvi_import_error}")
@@ -243,7 +243,7 @@ try:
     
     # Try to import WaterService
     try:
-        from services.water_service import WaterService
+        from .services.water_service import WaterService
         logger.info("✅ Successfully imported WaterService")
     except Exception as water_import_error:
         logger.error(f"❌ Failed to import WaterService: {water_import_error}")
@@ -264,10 +264,10 @@ except ImportError as general_import_error:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), 'services'))
-    from services.lulc_service import LULCService
+    from .services.lulc_service import LULCService
     
     try:
-        from services.ndvi_service import NDVIService
+        from .services.ndvi_service import NDVIService
         logger.info("✅ Successfully imported NDVIService via fallback")
     except Exception as fallback_error:
         logger.error(f"❌ Fallback import also failed: {fallback_error}")
@@ -278,7 +278,7 @@ except ImportError as general_import_error:
                 raise Exception(f"NDVIService fallback import failed: {fallback_error}")
     
     try:
-        from services.water_service import WaterService
+        from .services.water_service import WaterService
         logger.info("✅ Successfully imported WaterService via fallback")
     except Exception as water_fallback_error:
         logger.error(f"❌ WaterService fallback import also failed: {water_fallback_error}")
@@ -457,7 +457,7 @@ async def sample_ndvi_value(request: NDVISampleRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.ndvi_service import NDVIService
+        from .services.ndvi_service import NDVIService
         result = NDVIService.sample_ndvi_at_point(
             lng=request.lng,
             lat=request.lat,
@@ -485,7 +485,7 @@ async def generate_ndvi_grid(request: NDVIGridRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.ndvi_service import NDVIService
+        from .services.ndvi_service import NDVIService
         
         # Run grid generation with 30 second timeout to prevent backend hanging
         loop = asyncio.get_event_loop()
@@ -532,7 +532,7 @@ async def sample_ndvi_batch(request: NDVIBatchSampleRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.ndvi_service import NDVIService
+        from .services.ndvi_service import NDVIService
         result = NDVIService.sample_ndvi_batch(
             points=request.points,
             start_date=request.startDate,
@@ -555,7 +555,7 @@ async def sample_lst_value(request: LSTSampleRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.lst_service import LSTService
+        from .services.lst_service import LSTService
         result = LSTService.sample_lst_at_point(
             lng=request.lng,
             lat=request.lat,
@@ -582,7 +582,7 @@ async def generate_lst_grid(request: LSTGridRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.lst_service import LSTService
+        from .services.lst_service import LSTService
         
         # Run grid generation with 30 second timeout to prevent backend hanging
         loop = asyncio.get_event_loop()
@@ -628,7 +628,7 @@ async def sample_lst_batch(request: LSTBatchSampleRequest):
     if not gee_initialized:
         raise HTTPException(status_code=503, detail="GEE service not initialized")
     try:
-        from services.lst_service import LSTService
+        from .services.lst_service import LSTService
         result = LSTService.sample_lst_batch(
             points=request.points,
             start_date=request.startDate,
@@ -662,7 +662,7 @@ async def analyze_lst(request: LSTRequest):
         logger.info(f"🌡️ Starting LST analysis for geometry: {request.geometry.get('type', 'unknown')}")
         
         # Import LST service
-        from services.lst_service import LSTService
+        from .services.lst_service import LSTService
         
         # Create ROI data structure (simplified for basic endpoint)
         roi_data = {
@@ -736,7 +736,7 @@ async def analyze_uhi(request: LSTRequest):
         logger.info(f"🏙️ Starting UHI analysis for geometry: {request.geometry.get('type', 'unknown')}")
         
         # Import LST service
-        from services.lst_service import LSTService
+        from .services.lst_service import LSTService
         
         # Create ROI data structure
         roi_data = {
