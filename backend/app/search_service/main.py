@@ -41,14 +41,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware is handled by main app when running as monolith
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],  # Configure appropriately for production
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # # Initialize services
 # tavily_client = TavilyClient()

@@ -54,13 +54,10 @@ app.include_router(query_router.router, prefix="/query")
 # Include Search Service routes
 try:
     from .search_service.main import app as search_app
-    # Mount search service at /search
-    from fastapi import APIRouter
-    search_router = APIRouter()
     for route in search_app.routes:
         if hasattr(route, 'path') and hasattr(route, 'endpoint'):
-            # Skip root and duplicate health endpoints
-            if route.path not in ['/', '/openapi.json', '/docs', '/redoc']:
+            # Skip root and duplicate endpoints
+            if route.path not in ['/', '/openapi.json', '/docs', '/redoc', '/health']:
                 app.routes.append(route)
     print("✅ Search service routes loaded")
 except Exception as e:
