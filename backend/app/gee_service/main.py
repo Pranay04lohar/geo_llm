@@ -18,15 +18,46 @@ import sys
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-# Simplified GEE initialization - no external dependencies
+# Simplified GEE initialization - supports both file path and JSON string
 def initialize_gee():
-    """Initialize Google Earth Engine with simple authentication"""
+    """Initialize Google Earth Engine with service account authentication"""
     try:
         import ee
-        ee.Initialize()
+        import json
+        import os
+        
+        # Try to get credentials from environment
+        creds_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        
+        if creds_json:
+            # Use JSON string from environment variable
+            logger.info("🔑 Using GEE credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON")
+            credentials_dict = json.loads(creds_json)
+            credentials = ee.ServiceAccountCredentials(
+                credentials_dict['client_email'],
+                key_data=creds_json
+            )
+            ee.Initialize(credentials)
+        elif creds_path:
+            # Use file path from environment variable
+            logger.info(f"🔑 Using GEE credentials from file: {creds_path}")
+            with open(creds_path, 'r') as f:
+                credentials_dict = json.load(f)
+            credentials = ee.ServiceAccountCredentials(
+                credentials_dict['client_email'],
+                creds_path
+            )
+            ee.Initialize(credentials)
+        else:
+            # Fall back to default credentials (for local development)
+            logger.info("🔑 Using default GEE credentials")
+            ee.Initialize()
+        
+        logger.info("✅ GEE initialized successfully")
         return True
     except Exception as e:
-        logger.error(f"Failed to initialize GEE: {e}")
+        logger.error(f"❌ Failed to initialize GEE: {e}")
         return False
 
 # Import Google Earth Engine
