@@ -48,6 +48,12 @@ def parse_query(query: str = Query(..., description="The query string to parse")
     locations = roi_parser(query)
     return {"found_locations": locations}
 
+# Explicit OPTIONS handler for debugging
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle all OPTIONS requests"""
+    return {"message": "CORS preflight OK"}
+
 # Register routers
 app.include_router(query_router.router, prefix="/query")
 
