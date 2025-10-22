@@ -53,7 +53,7 @@ app.include_router(query_router.router, prefix="/query")
 
 # Include Search Service routes
 try:
-    from .search_service.main import app as search_app
+    from backend.app.search_service.main import app as search_app
     # Mount search service at /search
     from fastapi import APIRouter
     search_router = APIRouter()
@@ -68,7 +68,7 @@ except Exception as e:
 
 # Include GEE Service routes
 try:
-    from .gee_service.main import app as gee_app
+    from backend.app.gee_service.main import app as gee_app
     for route in gee_app.routes:
         if hasattr(route, 'path') and hasattr(route, 'endpoint'):
             # Skip root and duplicate health endpoints
@@ -80,7 +80,7 @@ except Exception as e:
 
 # Include RAG Service routes
 try:
-    from .rag_service.dynamic_rag.app.main import app as rag_app
+    from backend.app.rag_service.dynamic_rag.app.main import app as rag_app
     for route in rag_app.routes:
         if hasattr(route, 'path') and hasattr(route, 'endpoint'):
             # Skip root and duplicate endpoints, keep /api/v1 prefix
@@ -92,7 +92,7 @@ except Exception as e:
 
 # Include Core LLM Agent routes
 try:
-    from .services.core_llm_agent.core_agent_api import app as agent_app
+    from backend.app.services.core_llm_agent.core_agent_api import app as agent_app
     for route in agent_app.routes:
         if hasattr(route, 'path') and hasattr(route, 'endpoint'):
             # Skip root and duplicate endpoints
