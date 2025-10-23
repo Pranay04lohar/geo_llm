@@ -415,22 +415,35 @@ async def analyze_ndvi_vegetation(request: NDVIRequest):
     - Time-series data for trend analysis
     - Processing metadata and quality metrics
     """
+    logger.info(f"🚀 Starting NDVI analysis for geometry: {request.geometry.get('type', 'Unknown')}")
+    
     if not GEE_AVAILABLE:
+        logger.error("❌ Google Earth Engine not available")
         raise HTTPException(
             status_code=503,
             detail="Google Earth Engine not available"
         )
     
     if not gee_initialized:
+        logger.error("❌ GEE client not initialized")
         raise HTTPException(
             status_code=503, 
             detail="GEE client not initialized"
         )
     
-    logger.info(f"🌱 Starting NDVI analysis for geometry: {request.geometry.get('type', 'Unknown')}")
+    logger.info("✅ GEE checks passed, proceeding with analysis")
     
     try:
         # Debug: Log all parameters
+        logger.info(f"📊 NDVI Request parameters:")
+        logger.info(f"   - Geometry type: {request.geometry.get('type', 'Unknown')}")
+        logger.info(f"   - Start date: {request.startDate}")
+        logger.info(f"   - End date: {request.endDate}")
+        logger.info(f"   - Scale: {request.scale}")
+        logger.info(f"   - Max pixels: {request.maxPixels}")
+        logger.info(f"   - Cloud threshold: {request.cloudThreshold}")
+        
+        logger.info("🔧 Calling NDVIService.analyze_vegetation...")
         logger.info(f"🔧 NDVI Parameters:")
         logger.info(f"   - start_date: {request.startDate}")
         logger.info(f"   - end_date: {request.endDate}")
@@ -444,19 +457,36 @@ async def analyze_ndvi_vegetation(request: NDVIRequest):
         logger.info(f"🔧 NDVIService class: {NDVIService}")
         logger.info(f"🔧 NDVIService.analyze_ndvi method: {NDVIService.analyze_ndvi}")
         
-        # Call the NDVI service
+        # Call the NDVI service with timeout
         logger.info("🔧 Calling NDVIService.analyze_ndvi...")
-        result = NDVIService.analyze_ndvi(
-            geometry=request.geometry,
-            start_date=request.startDate,
-            end_date=request.endDate,
-            cloud_threshold=request.cloudThreshold,
-            scale=request.scale,
-            max_pixels=request.maxPixels,
-            include_time_series=request.includeTimeSeries,
-            exact_computation=request.exactComputation
-        )
-        logger.info(f"🔧 NDVIService.analyze_ndvi returned: {type(result)}")
+        try:
+            # Add timeout to prevent hanging
+            import asyncio
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: NDVIService.analyze_ndvi(
+                        geometry=request.geometry,
+                        start_date=request.startDate,
+                        end_date=request.endDate,
+                        cloud_threshold=request.cloudThreshold,
+                        scale=request.scale,
+                        max_pixels=request.maxPixels,
+                        include_time_series=request.includeTimeSeries,
+                        exact_computation=request.exactComputation
+                    )
+                ),
+                timeout=300  # 5 minute timeout
+            )
+            logger.info("✅ NDVIService.analyze_ndvi completed successfully")
+            logger.info(f"📊 Result keys: {list(result.keys()) if result else 'None'}")
+            logger.info(f"🔧 NDVIService.analyze_ndvi returned: {type(result)}")
+        except asyncio.TimeoutError:
+            logger.error("❌ NDVI analysis timed out after 5 minutes")
+            raise HTTPException(
+                status_code=408,
+                detail="NDVI analysis timed out. Please try with a smaller area or different parameters."
+            )
         
         if not result.get("success", False):
             # Handle service-level errors
