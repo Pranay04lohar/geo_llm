@@ -95,6 +95,66 @@ class SimpleStepProcessor:
         
         return 1000  # Default to medium area
     
+    async def _get_fallback_analysis(self, analysis_type: str, roi: Dict, user_prompt: str) -> Dict[str, Any]:
+        """Get fallback analysis from search service when GEE service is unavailable"""
+        try:
+            import requests
+            
+            # Extract location name from ROI or use a default
+            location_name = "the area"  # Default fallback
+            
+            # Try to get location name from ROI if available
+            if "properties" in roi and "name" in roi["properties"]:
+                location_name = roi["properties"]["name"]
+            
+            # Call search service for fallback analysis
+            response = requests.post(
+                f"{os.getenv('SERVICE_BASE_URL', 'http://localhost:8000')}/search/environmental-context",
+                json={
+                    "location": location_name,
+                    "analysis_type": analysis_type,
+                    "query": f"{analysis_type} analysis for {location_name}"
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            search_data = response.json()
+            
+            # Convert search service response to GEE-like format
+            fallback_result = {
+                "urlFormat": None,  # No tile URL available
+                "mapStats": {
+                    "analysis_type": analysis_type,
+                    "source": "search_service_fallback",
+                    "location": location_name,
+                    "summary": search_data.get("summary", f"Environmental analysis for {location_name}"),
+                    "key_findings": search_data.get("key_findings", []),
+                    "data_sources": search_data.get("data_sources", [])
+                },
+                "processing_time_seconds": 1.0,
+                "roi_area_km2": self._estimate_area_km2(roi),
+                "fallback_analysis": True
+            }
+            
+            logger.info(f"✅ Fallback {analysis_type} analysis completed using search service")
+            return fallback_result
+            
+        except Exception as e:
+            logger.error(f"❌ Fallback analysis failed: {e}")
+            # Return a minimal fallback response
+            return {
+                "urlFormat": None,
+                "mapStats": {
+                    "analysis_type": analysis_type,
+                    "source": "fallback_error",
+                    "error": str(e),
+                    "message": f"Analysis temporarily unavailable. Please try again later."
+                },
+                "processing_time_seconds": 0.1,
+                "roi_area_km2": self._estimate_area_km2(roi),
+                "fallback_analysis": True
+            }
+    
     async def process_water_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process water analysis using existing working endpoint"""
         try:
@@ -245,6 +305,16 @@ class SimpleStepProcessor:
                 analysis_data = response.json()
                 logger.info("✅ LST analysis completed successfully")
                 
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")
+                # Fallback to search service analysis
+                analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
+                
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"⚠️ LST analysis timed out, using fallback analysis: {e}")
+                # Fallback to search service analysis
+                analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
+                
             except Exception as e:
                 logger.error(f"❌ LST service failed: {e}")
                 raise
@@ -353,6 +423,16 @@ class SimpleStepProcessor:
                 response.raise_for_status()
                 analysis_data = response.json()
                 logger.info("✅ NDVI analysis completed successfully")
+                
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")
+                # Fallback to search service analysis
+                analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
+                
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"⚠️ NDVI analysis timed out, using fallback analysis: {e}")
+                # Fallback to search service analysis
+                analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
                 
             except Exception as e:
                 logger.error(f"❌ NDVI service failed: {e}")

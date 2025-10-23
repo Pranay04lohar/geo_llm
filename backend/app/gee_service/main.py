@@ -64,9 +64,12 @@ def initialize_gee():
 try:
     import ee
     GEE_AVAILABLE = True
-except ImportError:
+    logger.info("✅ Google Earth Engine module imported successfully")
+except ImportError as e:
     GEE_AVAILABLE = False
     ee = None
+    logger.warning(f"⚠️ Google Earth Engine not available: {e}")
+    logger.info("💡 Install with: pip install earthengine-api")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -97,7 +100,8 @@ async def startup_event():
     global gee_initialized
     
     if not GEE_AVAILABLE:
-        logger.error("Google Earth Engine not available. Install earthengine-api package.")
+        logger.warning("⚠️ Google Earth Engine not available. Install earthengine-api package.")
+        logger.info("💡 Service will run in fallback mode - endpoints will return service unavailable")
         return
     
     try:
@@ -107,9 +111,11 @@ async def startup_event():
         if gee_initialized:
             logger.info("✅ GEE Service initialized successfully")
         else:
-            logger.error("❌ Failed to initialize GEE client")
+            logger.warning("⚠️ Failed to initialize GEE client - service will run in fallback mode")
+            logger.info("💡 Check GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
     except Exception as e:
-        logger.error(f"❌ Startup error: {e}")
+        logger.warning(f"⚠️ Startup error: {e}")
+        logger.info("💡 Service will run in fallback mode - endpoints will return service unavailable")
 
 # Request/Response Models
 class GEERequest(BaseModel):
@@ -224,10 +230,12 @@ class ErrorResponse(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    status = "healthy" if GEE_AVAILABLE and gee_initialized else "degraded"
     return {
-        "status": "healthy",
+        "status": status,
         "gee_available": GEE_AVAILABLE,
-        "gee_initialized": gee_initialized
+        "gee_initialized": gee_initialized,
+        "message": "Service running" if status == "healthy" else "Service running in fallback mode - GEE not available"
     }
 
 @app.get("/")
