@@ -315,6 +315,14 @@ class SimpleStepProcessor:
                 # Fallback to search service analysis
                 analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
                 
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 404:
+                    logger.warning(f"⚠️ LST endpoint not found (404), using fallback analysis: {e}")
+                    # Fallback to search service analysis
+                    analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
+                else:
+                    raise
+                
             except Exception as e:
                 logger.error(f"❌ LST service failed: {e}")
                 raise
@@ -433,6 +441,14 @@ class SimpleStepProcessor:
                 logger.warning(f"⚠️ NDVI analysis timed out, using fallback analysis: {e}")
                 # Fallback to search service analysis
                 analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 404:
+                    logger.warning(f"⚠️ NDVI endpoint not found (404), using fallback analysis: {e}")
+                    # Fallback to search service analysis
+                    analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
+                else:
+                    raise
                 
             except Exception as e:
                 logger.error(f"❌ NDVI service failed: {e}")

@@ -60,6 +60,10 @@ def initialize_gee():
         logger.error(f"❌ Failed to initialize GEE: {e}")
         return False
 
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import Google Earth Engine
 try:
     import ee
@@ -87,9 +91,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Logger already configured above
 
 # Global GEE status
 gee_initialized = False
