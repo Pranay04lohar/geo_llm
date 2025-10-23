@@ -45,6 +45,56 @@ class SimpleStepProcessor:
         else:
             return "ndvi"  # Default to NDVI/LULC analysis (most common)
     
+    def _get_optimized_parameters(self, roi: Dict) -> Dict[str, Any]:
+        """Get optimized parameters based on ROI size to prevent timeouts"""
+        # Estimate area from geometry (rough calculation)
+        area_km2 = self._estimate_area_km2(roi)
+        
+        if area_km2 > 10000:  # Very large area (>10,000 km²)
+            return {
+                "scale": 200,  # Coarser resolution
+                "maxPixels": 1e7,  # Lower pixel limit
+                "timeout": 600,  # 10 minutes timeout
+                "exactComputation": False
+            }
+        elif area_km2 > 1000:  # Large area (1,000-10,000 km²)
+            return {
+                "scale": 120,  # Medium resolution
+                "maxPixels": 1e8,  # Medium pixel limit
+                "timeout": 300,  # 5 minutes timeout
+                "exactComputation": False
+            }
+        else:  # Small area (<1,000 km²)
+            return {
+                "scale": 60,  # Fine resolution
+                "maxPixels": 1e9,  # High pixel limit
+                "timeout": 180,  # 3 minutes timeout
+                "exactComputation": True
+            }
+    
+    def _estimate_area_km2(self, roi: Dict) -> float:
+        """Rough estimation of area in km² from geometry"""
+        try:
+            if roi.get("type") == "Polygon":
+                coords = roi.get("coordinates", [[]])
+                if coords and len(coords) > 0:
+                    # Simple bounding box area estimation
+                    lons = [coord[0] for ring in coords for coord in ring]
+                    lats = [coord[1] for ring in coords for coord in ring]
+                    
+                    if lons and lats:
+                        # Rough area calculation using bounding box
+                        lat_range = max(lats) - min(lats)
+                        lon_range = max(lons) - min(lons)
+                        # Convert to km (rough approximation)
+                        area_deg2 = lat_range * lon_range
+                        area_km2 = area_deg2 * 111 * 111  # Rough conversion
+                        return area_km2
+        except Exception as e:
+            logger.warning(f"Could not estimate area: {e}")
+        
+        return 1000  # Default to medium area
+    
     async def process_water_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process water analysis using existing working endpoint"""
         try:
@@ -159,13 +209,17 @@ class SimpleStepProcessor:
             }
             await asyncio.sleep(0.5)
             
+            # Get optimized parameters based on area size
+            params = self._get_optimized_parameters(roi)
+            logger.info(f"🔧 [LST] Using optimized parameters: scale={params['scale']}, maxPixels={params['maxPixels']}, timeout={params['timeout']}")
+            
             # Step 2: Call existing working endpoint
             yield {
                 "step": 2,
                 "status": "processing",
                 "message": "Analyzing land surface temperature using MODIS data...",
                 "progress": 30,
-                "details": "Processing thermal infrared data (this may take 1-2 minutes for satellite data)"
+                "details": f"Processing thermal infrared data (scale: {params['scale']}m, maxPixels: {params['maxPixels']:.0e})"
             }
             
             try:
@@ -181,11 +235,11 @@ class SimpleStepProcessor:
                         "endDate": "2023-08-31",
                         "includeUHI": True,
                         "includeTimeSeries": False,
-                        "scale": 1000,
-                        "maxPixels": 1e8,
-                        "exactComputation": False
+                        "scale": params["scale"],
+                        "maxPixels": int(params["maxPixels"]),
+                        "exactComputation": params["exactComputation"]
                     },
-                    timeout=180
+                    timeout=params["timeout"]
                 )
                 response.raise_for_status()
                 analysis_data = response.json()
@@ -264,13 +318,17 @@ class SimpleStepProcessor:
             }
             await asyncio.sleep(0.5)
             
+            # Get optimized parameters based on area size
+            params = self._get_optimized_parameters(roi)
+            logger.info(f"🔧 [NDVI] Using optimized parameters: scale={params['scale']}, maxPixels={params['maxPixels']}, timeout={params['timeout']}")
+            
             # Step 2: Call existing working endpoint
             yield {
                 "step": 2,
                 "status": "processing",
                 "message": "Analyzing vegetation health using Sentinel-2 data...",
                 "progress": 30,
-                "details": "Processing NDVI calculations (this may take 1-2 minutes for satellite data)"
+                "details": f"Processing NDVI calculations (scale: {params['scale']}m, maxPixels: {params['maxPixels']:.0e})"
             }
             
             try:
@@ -285,12 +343,12 @@ class SimpleStepProcessor:
                         "startDate": "2023-06-01",
                         "endDate": "2023-08-31",
                         "cloudThreshold": 30,
-                        "scale": 60,
-                        "maxPixels": 1e9,
+                        "scale": params["scale"],
+                        "maxPixels": int(params["maxPixels"]),
                         "includeTimeSeries": False,
-                        "exactComputation": False
+                        "exactComputation": params["exactComputation"]
                     },
-                    timeout=180
+                    timeout=params["timeout"]
                 )
                 response.raise_for_status()
                 analysis_data = response.json()
