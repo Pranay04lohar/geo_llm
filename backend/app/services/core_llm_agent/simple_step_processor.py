@@ -6,6 +6,7 @@ and show real-time progress steps.
 
 import asyncio
 import logging
+import os
 from typing import Dict, Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
