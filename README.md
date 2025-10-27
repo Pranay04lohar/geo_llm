@@ -9,6 +9,13 @@ A comprehensive geospatial analysis platform that combines AI-powered query proc
 
 ---
 
+## Demo Video:
+### GEE Service:
+#### NDVI (Normalized Difference Vegetation Index)
+
+https://github.com/user-attachments/assets/4ee32477-8d94-4cf3-9764-9f5f83563724
+
+
 ## 🌍 Table of Contents
 
 - [Overview](#-overview)
