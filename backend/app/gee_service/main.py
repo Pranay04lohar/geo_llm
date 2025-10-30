@@ -305,10 +305,10 @@ except ImportError as general_import_error:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), 'services'))
-    from .services.lulc_service import LULCService
+    from services.lulc_service import LULCService
     
     try:
-        from .services.ndvi_service import NDVIService
+        from services.ndvi_service import NDVIService
         logger.info("✅ Successfully imported NDVIService via fallback")
     except Exception as fallback_error:
         logger.error(f"❌ Fallback import also failed: {fallback_error}")
@@ -319,7 +319,7 @@ except ImportError as general_import_error:
                 raise Exception(f"NDVIService fallback import failed: {fallback_error}")
     
     try:
-        from .services.water_service import WaterService
+        from services.water_service import WaterService
         logger.info("✅ Successfully imported WaterService via fallback")
     except Exception as water_fallback_error:
         logger.error(f"❌ WaterService fallback import also failed: {water_fallback_error}")
