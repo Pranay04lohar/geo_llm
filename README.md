@@ -9,6 +9,26 @@ A comprehensive geospatial analysis platform that combines AI-powered query proc
 
 ---
 
+## Demo Video:
+### GEE Service:
+#### NDVI (Normalized Difference Vegetation Index)
+
+https://github.com/user-attachments/assets/4ee32477-8d94-4cf3-9764-9f5f83563724
+
+#### LST (Land Surface Temperature)
+
+https://github.com/user-attachments/assets/3569546e-2117-4d14-8574-f9b3e8ce8384
+
+#### Water Analysis
+
+https://github.com/user-attachments/assets/95a161d0-3891-41df-9e4b-ead00e090b85
+
+### Dynamic RAG Service:
+
+https://github.com/user-attachments/assets/c202176c-3d6a-4fb4-a03b-0334c9e9733b
+
+
+
 ## 🌍 Table of Contents
 
 - [Overview](#-overview)
