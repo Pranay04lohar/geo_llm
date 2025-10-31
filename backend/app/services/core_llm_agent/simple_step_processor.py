@@ -218,7 +218,7 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating tile URLs and interactive features"
             }
-            await asyncio.sleep(1)
+            await asyncio.sleep(6)
             
             # Step 5: Complete
             logger.info(f"🎯 Preparing final result with analysis_data keys: {list(analysis_data.keys()) if analysis_data else 'None'}")
@@ -338,7 +338,7 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating temperature map tiles"
             }
-            await asyncio.sleep(1)
+            await asyncio.sleep(6)
             
             # Step 5: Complete
             # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
@@ -459,7 +459,7 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating NDVI map tiles"
             }
-            await asyncio.sleep(1)
+            await asyncio.sleep(6)
             
             # Step 5: Complete
             # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
