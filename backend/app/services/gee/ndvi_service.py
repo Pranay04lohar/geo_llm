@@ -1110,27 +1110,8 @@ class NDVIService:
             }
             map_id = median_ndvi.getMapId(vis_params)
             
-            # Debug: Log the complete map_id response
-            logger.info(f"🔍 DEBUG - Complete map_id response: {map_id}")
-            logger.info(f"🔍 DEBUG - map_id keys: {list(map_id.keys()) if map_id else 'None'}")
-            
-            # Handle missing token by generating a new one
-            if map_id and 'token' in map_id and map_id['token']:
-                token = map_id['token']
-                logger.info(f"🔍 DEBUG - Token length: {len(str(token))}")
-                logger.info(f"🔍 DEBUG - Token preview: {str(token)[:50]}...")
-            else:
-                logger.warning(f"⚠️ WARNING - No token found in map_id response!")
-                # Try to get a fresh token using ee.data.getMapId
-                try:
-                    fresh_map_id = ee.data.getMapId({'image': median_ndvi, 'vis_params': vis_params})
-                    token = fresh_map_id.get('token', '')
-                    logger.info(f"🔄 Generated fresh token: {len(str(token))} characters")
-                except Exception as e:
-                    logger.error(f"❌ Failed to generate fresh token: {e}")
-                    token = ''
-            
-            tile_url = f"https://earthengine.googleapis.com/map/{map_id['mapid']}/{{z}}/{{x}}/{{y}}?token={token}"
+            # Use same tile URL format as LST (no token needed - GEE handles auth internally)
+            tile_url = f"https://earthengine.googleapis.com/v1/{map_id['mapid']}/tiles/{{z}}/{{x}}/{{y}}"
             tile_urls = {"urlFormat": tile_url}
             
             # Time series analysis if requested
@@ -1148,10 +1129,17 @@ class NDVIService:
                 "analysis_type": "polygon_geometry",
                 "geometry_type": "single_polygon",
                 "area_km2": polygon_area_km2,
+                # Align with LST: expose top-level urlFormat and mapStats
+                "urlFormat": tile_urls.get("urlFormat", ""),
                 "ndvi_stats": ndvi_stats,
                 "vegetation_distribution": vegetation_stats,
                 "histogram": histogram,
                 "tile_urls": tile_urls,
+                "mapStats": {
+                    "ndvi_statistics": ndvi_stats,
+                    "vegetation_distribution": vegetation_stats,
+                    "image_count": image_count
+                },
                 "time_series": time_series_data,
                 "image_count": image_count,  # Add image count for validation
                 "metadata": {

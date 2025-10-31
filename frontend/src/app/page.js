@@ -11,8 +11,7 @@ import {
 } from "@/utils/api";
 // Simple API functions - no need for separate files
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const RAG_API_BASE = API_BASE;
 const DYNAMIC_RAG_BASE = API_BASE;
 const CORE_AGENT_API_BASE = API_BASE;
@@ -261,7 +260,7 @@ export default function Home() {
       // Call backend search service (uses sophisticated NominatimClient)
       const SEARCH_SERVICE_URL = API_BASE;
 
-      const response = await fetch(`${API_BASE_URL}/api/search/location-data`, {
+      const response = await fetch(`${API_BASE}/api/search/location-data`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -567,7 +566,7 @@ export default function Home() {
     }, 180000); // 3 minute timeout for geospatial analysis
 
     try {
-      const response = await fetch(`${CORE_AGENT_API_BASE}/cot-stream`, {
+      const response = await fetch(`${CORE_AGENT_API_BASE}/api/query/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -861,8 +860,15 @@ export default function Home() {
 
       return analysis;
     } else if (analysisType === "ndvi") {
-      const ndviStats = stats.ndvi_statistics || stats;
-      const meanNDVI = ndviStats.mean || 0;
+      // Normalize NDVI stats from backend (supports NDVI_mean or mean, etc.)
+      const ndviStatsRaw = stats.ndvi_statistics || stats.ndvi_stats || stats;
+      const ndviStats = {
+        mean: ndviStatsRaw.NDVI_mean ?? ndviStatsRaw.mean ?? 0,
+        min: ndviStatsRaw.NDVI_min ?? ndviStatsRaw.min ?? 0,
+        max: ndviStatsRaw.NDVI_max ?? ndviStatsRaw.max ?? 0,
+        stdDev: ndviStatsRaw.NDVI_stdDev ?? ndviStatsRaw.stdDev ?? 0,
+      };
+      const meanNDVI = ndviStats.mean;
       const vegType = stats.dominant_vegetation_type || "Unknown";
 
       let analysis = `✅ Vegetation Analysis Complete!\n\n`;
@@ -892,9 +898,9 @@ export default function Home() {
       analysis += `**Vegetation Statistics:**\n`;
       analysis += `• Mean NDVI: ${meanNDVI.toFixed(3)}\n`;
       analysis += `• Dominant Type: ${vegType}\n`;
-      analysis += `• NDVI Range: ${ndviStats.min?.toFixed(3) || 0} to ${
-        ndviStats.max?.toFixed(3) || 0
-      }\n`;
+      analysis += `• NDVI Range: ${ndviStats.min.toFixed(
+        3
+      )} to ${ndviStats.max.toFixed(3)}\n`;
       analysis += `• Total Area: ${area.toFixed(1)} km²\n\n`;
 
       analysis += `**Dataset:** Sentinel-2\n`;

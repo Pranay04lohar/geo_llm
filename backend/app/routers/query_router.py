@@ -1,8 +1,14 @@
 """
 Main Query Router - Handles all geospatial query requests
+"""
 
-from fastapi import APIRouter
-from ..models import QueryRequest, QueryResponse
+import logging
+from typing import Optional, Dict, Any, AsyncGenerator
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

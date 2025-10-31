@@ -8,8 +8,7 @@ import { FaExpand, FaEye, FaEyeSlash } from "react-icons/fa";
 import FullScreenMap from "./FullScreenMap";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://geollm-backend-hbdccjdfhhdphyfx.canadacentral-01.azurewebsites.net";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 // Debounce utility
 function debounce(func, wait) {
@@ -157,7 +156,15 @@ export default function AnalysisResult({ content }) {
         // Add analysis layer if tile URL is available
         if (mapData.tile_url) {
           try {
-            console.log("Adding analysis layer with URL:", mapData.tile_url);
+            console.log("🗺️ Adding analysis layer with URL:", mapData.tile_url);
+            console.log("🗺️ Analysis type:", mapData.analysis_type);
+
+            // Ensure tile URL is valid (should start with https://earthengine.googleapis.com)
+            if (!mapData.tile_url.startsWith("https://")) {
+              console.error("❌ Invalid tile URL format:", mapData.tile_url);
+              return;
+            }
+
             // Add the analysis layer
             map.current.addSource("analysis", {
               type: "raster",
@@ -174,12 +181,15 @@ export default function AnalysisResult({ content }) {
               },
             });
 
-            console.log("Analysis layer added successfully");
+            console.log("✅ Analysis layer added successfully");
           } catch (error) {
-            console.error("Error adding analysis layer:", error);
+            console.error("❌ Error adding analysis layer:", error);
+            console.error("❌ Tile URL was:", mapData.tile_url);
+            console.error("❌ Error details:", JSON.stringify(error, null, 2));
           }
         } else {
-          console.warn("No tile URL available for analysis layer");
+          console.warn("⚠️ No tile URL available for analysis layer");
+          console.warn("⚠️ mapData keys:", Object.keys(mapData));
         }
 
         // Add ROI boundary if available
@@ -439,12 +449,7 @@ export default function AnalysisResult({ content }) {
             }
 
             // Fallback to API sampling if grid not loaded or point not in grid
-            const sampleEndpoint =
-              analysisType === "lst"
-                ? `${API_BASE}/lst/sample`
-                : analysisType === "ndvi"
-                ? `${API_BASE}/ndvi/sample`
-                : `${API_BASE}/water/sample`;
+            const sampleEndpoint = `${API_BASE}/api/query/sample`;
 
             console.log(
               `Fetching ${analysisType.toUpperCase()} sample from backend...`
@@ -467,7 +472,7 @@ export default function AnalysisResult({ content }) {
             if (sampleDebounced._inFlight) return;
             sampleDebounced._inFlight = true;
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for hover (fast fail)
 
             const resp = await fetch(sampleEndpoint, {
               method: "POST",
@@ -561,9 +566,19 @@ export default function AnalysisResult({ content }) {
             updateTooltipContent(info);
             console.log("Tooltip updated with info:", info);
           } catch (e) {
-            console.error("Hover sample error:", e);
+            console.log(
+              "Hover sample error (expected for slow GEE):",
+              e.message
+            );
             if (e.name === "AbortError") {
-              console.error("Sample request timed out after 10 seconds");
+              console.log(
+                "Sample request timed out (GEE query too slow for hover)"
+              );
+              // Show a simple message instead of failing
+              updateTooltipContent({
+                message: "Hover data unavailable (GEE query too slow)",
+                coords: `${lngLat.lat.toFixed(4)}, ${lngLat.lng.toFixed(4)}`,
+              });
             }
           } finally {
             sampleDebounced._inFlight = false;
@@ -671,10 +686,7 @@ export default function AnalysisResult({ content }) {
           tooltip.innerHTML = "<div>🔍 Sampling precise value...</div>";
 
           try {
-            const clickEndpoint =
-              analysisType === "lst"
-                ? `${API_BASE}/lst/sample`
-                : `${API_BASE}/ndvi/sample`;
+            const clickEndpoint = `${API_BASE}/api/query/sample`;
 
             const resp = await fetch(clickEndpoint, {
               method: "POST",
@@ -847,7 +859,22 @@ export default function AnalysisResult({ content }) {
       }
 
       map.current.on("error", (e) => {
-        console.error("Map error:", e);
+        console.error("🚨 Map error:", e);
+        console.error("🚨 Error type:", e?.type);
+        console.error("🚨 Error message:", e?.message);
+        console.error("🚨 Error source:", e?.source);
+        console.error(
+          "🚨 Full error object:",
+          JSON.stringify(e, Object.getOwnPropertyNames(e), 2)
+        );
+
+        // Check if it's a tile loading error
+        if (e?.source && e.source === "analysis") {
+          console.error("🚨 Analysis tile layer failed to load!");
+          console.error(
+            "🚨 Tile URL might be invalid or authentication failed"
+          );
+        }
       });
     } catch (error) {
       console.error("Error initializing map:", error);
