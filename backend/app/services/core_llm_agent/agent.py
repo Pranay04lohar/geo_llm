@@ -41,7 +41,8 @@ class CoreLLMAgent:
         self, 
         model_name: str = None,
         nominatim_url: str = None,
-        enable_debug: bool = False
+        enable_debug: bool = False,
+        rag_store=None
     ):
         """Initialize the CoreLLMAgent with all pipeline components.
         
@@ -49,13 +50,14 @@ class CoreLLMAgent:
             model_name: Model name for LLM operations (uses env default if None)
             nominatim_url: Nominatim API URL (uses default if None)
             enable_debug: Whether to enable detailed debug output
+            rag_store: RAGStore instance for document Q&A (optional)
         """
         self.enable_debug = enable_debug
         
         # Initialize pipeline components
         self.location_parser = LocationParser(model_name, nominatim_url)
         self.intent_classifier = IntentClassifier(model_name)
-        self.service_dispatcher = ServiceDispatcher()
+        self.service_dispatcher = ServiceDispatcher(rag_store=rag_store)
         self.result_formatter = ResultFormatter()
         
         # Log model configuration

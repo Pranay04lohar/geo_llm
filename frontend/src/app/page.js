@@ -261,19 +261,16 @@ export default function Home() {
       // Call backend search service (uses sophisticated NominatimClient)
       const SEARCH_SERVICE_URL = API_BASE;
 
-      const response = await fetch(
-        `${SEARCH_SERVICE_URL}/search/location-data`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            location_name: location,
-            location_type: "city",
-          }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/api/search/location-data`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          location_name: location,
+          location_type: "city",
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Search service failed: ${response.status}`);
@@ -574,12 +571,12 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_prompt: userPrompt,
-          roi: roi || null,
+          query: userPrompt,
+          roi: originalROI || roi || null,
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -599,101 +596,102 @@ export default function Home() {
               const stepData = JSON.parse(line.slice(6));
               console.log("📊 Received step data:", stepData);
 
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === cotMessageId
+                  ? {
+                      ...msg,
+                      content: generateCOTContent(stepData),
+                      steps: [...(msg.steps || []), stepData],
+                    }
+                  : msg
+              )
+            );
+
+            setCurrentStep(stepData.step);
+            setCotSteps((prev) => [...prev, stepData]);
+
+            // Check if this step has an error status
+            if (stepData.status === "error") {
+              console.error("COT step failed:", stepData.message);
+              clearTimeout(timeoutId); // Clear the timeout
+              // Stop processing and show error
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === cotMessageId
                     ? {
-                        ...msg,
-                        content: generateCOTContent(stepData),
-                        steps: [...(msg.steps || []), stepData],
+                        type: "assistant",
+                        content: `❌ Analysis failed: ${stepData.message}\n\nPlease try again with a different query.`,
                       }
                     : msg
                 )
               );
+              // Force reset all processing states
+              setIsCOTProcessing(false);
+              setCurrentStep(0);
+              setCotSteps([]);
+              return; // Exit the streaming loop
+            }
 
-              setCurrentStep(stepData.step);
-              setCotSteps((prev) => [...prev, stepData]);
+            // If this is the final step, replace COT with result
+            if (stepData.final_result) {
+              // Debug: Log ROI received from backend
+              console.log("📥 [RECEIVE] ROI from backend:", {
+                type: stepData.final_result.roi?.type,
+                coordinates_rings:
+                  stepData.final_result.roi?.coordinates?.length,
+                first_ring_points:
+                  stepData.final_result.roi?.coordinates?.[0]?.length,
+                display_name: stepData.final_result.roi?.display_name,
+                full_roi: stepData.final_result.roi,
+              });
 
-              // Check if this step has an error status
-              if (stepData.status === "error") {
-                console.error("COT step failed:", stepData.message);
-                clearTimeout(timeoutId); // Clear the timeout
-                // Stop processing and show error
+              // Compare with original
+              console.log("🔍 [COMPARE] Original vs Received:");
+              console.log(
+                "  Original points:",
+                originalROI?.coordinates?.[0]?.length
+              );
+              console.log(
+                "  Received points:",
+                stepData.final_result.roi?.coordinates?.[0]?.length
+              );
+
+              // If ROI was simplified, use original
+              if (
+                originalROI?.coordinates?.[0]?.length > 10 &&
+                stepData.final_result.roi?.coordinates?.[0]?.length <= 5
+              ) {
+                console.warn(
+                  "⚠️ ROI was simplified to bounding box! Using original polygon instead."
+                );
+                stepData.final_result.roi = originalROI;
+              }
+
+              setTimeout(() => {
+                const formattedResult = formatFinalResult(
+                  stepData.final_result
+                );
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === cotMessageId
                       ? {
                           type: "assistant",
-                          content: `❌ Analysis failed: ${stepData.message}\n\nPlease try again with a different query.`,
+                          content: formattedResult,
                         }
                       : msg
                   )
                 );
-                // Force reset all processing states
-                setIsCOTProcessing(false);
-                setCurrentStep(0);
-                setCotSteps([]);
-                return; // Exit the streaming loop
-              }
-
-              // If this is the final step, replace COT with result
-              if (stepData.final_result) {
-                // Debug: Log ROI received from backend
-                console.log("📥 [RECEIVE] ROI from backend:", {
-                  type: stepData.final_result.roi?.type,
-                  coordinates_rings:
-                    stepData.final_result.roi?.coordinates?.length,
-                  first_ring_points:
-                    stepData.final_result.roi?.coordinates?.[0]?.length,
-                  display_name: stepData.final_result.roi?.display_name,
-                  full_roi: stepData.final_result.roi,
-                });
-
-                // Compare with original
-                console.log("🔍 [COMPARE] Original vs Received:");
-                console.log(
-                  "  Original points:",
-                  originalROI?.coordinates?.[0]?.length
-                );
-                console.log(
-                  "  Received points:",
-                  stepData.final_result.roi?.coordinates?.[0]?.length
-                );
-
-                // If ROI was simplified, use original
-                if (
-                  originalROI?.coordinates?.[0]?.length > 10 &&
-                  stepData.final_result.roi?.coordinates?.[0]?.length <= 5
-                ) {
-                  console.warn(
-                    "⚠️ ROI was simplified to bounding box! Using original polygon instead."
-                  );
-                  stepData.final_result.roi = originalROI;
-                }
-
-                setTimeout(() => {
-                  const formattedResult = formatFinalResult(
-                    stepData.final_result
-                  );
-                  setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === cotMessageId
-                        ? {
-                            type: "assistant",
-                            content: formattedResult,
-                          }
-                        : msg
-                    )
-                  );
-                }, 2000); // Wait 2 seconds before showing final result
-              }
-            } catch (parseError) {
-              console.error("Error parsing COT step:", parseError);
+              }, 2000); // Wait 2 seconds before showing final result
             }
+          } catch (parseError) {
+            console.error("Error parsing step data:", parseError);
           }
         }
       }
-    } catch (error) {
+      // Close while loop
+      }
+    }catch (error) {
       console.error("COT streaming failed:", error);
       setMessages((prev) =>
         prev.map((msg) =>
