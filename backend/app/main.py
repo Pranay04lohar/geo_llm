@@ -79,9 +79,13 @@ async def lifespan(app: FastAPI):
         # ========================================================================
         logger.info("🌍 Initializing Google Earth Engine...")
         try:
-            import ee
-            ee.Initialize()
-            logger.info("✅ Google Earth Engine initialized successfully")
+            # Use lightweight initializer in app.services.gee (no extra imports)
+            from app.services.gee import initialize_gee
+            if initialize_gee():
+                logger.info("✅ Google Earth Engine initialized successfully")
+            else:
+                logger.error("❌ GEE initialization returned False")
+                logger.warning("⚠️  GEE services may not work properly")
         except Exception as e:
             logger.error(f"❌ Failed to initialize GEE: {e}")
             logger.warning("⚠️  GEE services may not work properly")
