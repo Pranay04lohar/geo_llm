@@ -283,43 +283,28 @@ class SimpleStepProcessor:
             }
             
             try:
-                # Use HTTP for LST (like static COT does) to avoid EE context issues
-                import requests
+                # Direct service call (monolithic architecture)
+                from app.services.gee.lst_service import LSTService
                 
-                # Use roi directly as geometry (same as static COT)
-                response = requests.post(
-                    f"{os.getenv('SERVICE_BASE_URL', 'http://localhost:8000')}/lst/land-surface-temperature",
-                    json={
-                        "geometry": roi,
-                        "startDate": "2023-06-01",
-                        "endDate": "2023-08-31",
-                        "includeUHI": True,
-                        "includeTimeSeries": False,
-                        "scale": params["scale"],
-                        "maxPixels": int(params["maxPixels"]),
-                        "exactComputation": params["exactComputation"]
-                    },
-                    timeout=params["timeout"]
+                logger.info("🔬 Calling LSTService.analyze_lst_with_polygon directly...")
+                result = LSTService.analyze_lst_with_polygon(
+                    roi_data={"polygon_geometry": roi},  # Use correct key name
+                    start_date="2023-06-01",
+                    end_date="2023-08-31",
+                    include_uhi=True,
+                    include_time_series=False,
+                    scale=params["scale"],
+                    max_pixels=int(params["maxPixels"]),
+                    exact_computation=params["exactComputation"]
                 )
+                # Check if LST service returned an error
+                if not result.get("success", True):
+                    error_msg = result.get("error", "Unknown LST error")
+                    logger.error(f"❌ LST service returned error: {error_msg}")
+                    raise Exception(f"LST analysis failed: {error_msg}")
+                
                 logger.info("✅ LST analysis completed successfully (direct call)")
-                
-            except requests.exceptions.ConnectionError as e:
-                logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")
-                # Fallback to search service analysis
-                analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
-                
-            except requests.exceptions.Timeout as e:
-                logger.warning(f"⚠️ LST analysis timed out, using fallback analysis: {e}")
-                # Fallback to search service analysis
-                analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
-                
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404:
-                    logger.warning(f"⚠️ LST endpoint not found (404), using fallback analysis: {e}")
-                    # Fallback to search service analysis
-                    analysis_data = await self._get_fallback_analysis("lst", roi, user_prompt)
-                else:
-                    raise
+                analysis_data = result
                 
             except Exception as e:
                 logger.error(f"❌ LST service failed: {e}")
@@ -350,6 +335,11 @@ class SimpleStepProcessor:
             simplified_roi = self._simplify_roi_for_streaming(roi)
             logger.info(f"🎯 LST final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
             
+            # Extract tile URL with debug logging
+            tile_url = analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url")
+            logger.info(f"🗺️ LST tile_url extracted: {tile_url[:100] if tile_url else 'NONE'}")
+            logger.info(f"📦 LST response keys: {list(analysis_data.keys())}")
+            
             yield {
                 "step": 5,
                 "status": "completed",
@@ -358,7 +348,7 @@ class SimpleStepProcessor:
                 "details": "Interactive thermal map ready",
                 "final_result": {
                     "analysis_type": "lst",
-                    "tile_url": analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url"),
+                    "tile_url": tile_url,
                     "stats": {
                         **analysis_data.get("mapStats", {}),
                         "total_area_km2": analysis_data.get("roi_area_km2", 0)
@@ -408,43 +398,28 @@ class SimpleStepProcessor:
             }
             
             try:
-                # Use HTTP for NDVI (like static COT does) to avoid EE context issues
-                import requests
+                # Direct service call (monolithic architecture)
+                from app.services.gee.ndvi_service import NDVIService
                 
-                # Use roi directly as geometry (same as static COT)
-                response = requests.post(
-                    f"{os.getenv('SERVICE_BASE_URL', 'http://localhost:8000')}/ndvi/vegetation-analysis",
-                    json={
-                        "geometry": roi,
-                        "startDate": "2023-06-01",
-                        "endDate": "2023-08-31",
-                        "cloudThreshold": 30,
-                        "scale": params["scale"],
-                        "maxPixels": int(params["maxPixels"]),
-                        "includeTimeSeries": False,
-                        "exactComputation": params["exactComputation"]
-                    },
-                    timeout=params["timeout"]
+                logger.info("🔬 Calling NDVIService.analyze_ndvi_with_polygon directly...")
+                result = NDVIService.analyze_ndvi_with_polygon(
+                    roi_data={"polygon_geometry": roi},  # Use correct key name
+                    start_date="2023-06-01",
+                    end_date="2023-08-31",
+                    cloud_threshold=30,
+                    scale=params["scale"],
+                    max_pixels=int(params["maxPixels"]),
+                    include_time_series=False,
+                    exact_computation=params["exactComputation"]
                 )
+                # Check if NDVI service returned an error
+                if not result.get("success", True):
+                    error_msg = result.get("error", "Unknown NDVI error")
+                    logger.error(f"❌ NDVI service returned error: {error_msg}")
+                    raise Exception(f"NDVI analysis failed: {error_msg}")
+                
                 logger.info("✅ NDVI analysis completed successfully (direct call)")
-                
-            except requests.exceptions.ConnectionError as e:
-                logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")
-                # Fallback to search service analysis
-                analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
-                
-            except requests.exceptions.Timeout as e:
-                logger.warning(f"⚠️ NDVI analysis timed out, using fallback analysis: {e}")
-                # Fallback to search service analysis
-                analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
-                
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404:
-                    logger.warning(f"⚠️ NDVI endpoint not found (404), using fallback analysis: {e}")
-                    # Fallback to search service analysis
-                    analysis_data = await self._get_fallback_analysis("ndvi", roi, user_prompt)
-                else:
-                    raise
+                analysis_data = result
                 
             except Exception as e:
                 logger.error(f"❌ NDVI service failed: {e}")
@@ -475,6 +450,23 @@ class SimpleStepProcessor:
             simplified_roi = self._simplify_roi_for_streaming(roi)
             logger.info(f"🎯 NDVI final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
             
+            # Extract tile URL with debug logging (same as LST), with NDVI-specific fallback
+            tile_url = (
+                analysis_data.get("urlFormat")
+                or analysis_data.get("visualization", {}).get("tile_url")
+                or analysis_data.get("tile_urls", {}).get("urlFormat")
+            )
+            logger.info(f"🗺️ NDVI tile_url extracted: {tile_url[:100] if tile_url else 'NONE'}")
+            logger.info(f"📦 NDVI response keys: {list(analysis_data.keys())}")
+
+            # NDVI stats may come as mapStats.ndvi_statistics or ndvi_stats
+            ndvi_stats = (
+                analysis_data.get("mapStats", {}).get("ndvi_statistics")
+                or analysis_data.get("ndvi_stats", {})
+                or {}
+            )
+            total_area_km2 = analysis_data.get("roi_area_km2", analysis_data.get("area_km2", 0))
+            
             yield {
                 "step": 5,
                 "status": "completed",
@@ -483,10 +475,10 @@ class SimpleStepProcessor:
                 "details": "Interactive vegetation map ready",
                 "final_result": {
                     "analysis_type": "ndvi",
-                    "tile_url": analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url"),
+                    "tile_url": tile_url,
                     "stats": {
-                        **analysis_data.get("mapStats", {}).get("ndvi_statistics", {}),
-                        "total_area_km2": analysis_data.get("roi_area_km2", 0)
+                        **ndvi_stats,
+                        "total_area_km2": total_area_km2
                     },
                     "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
                     "service_used": "GEE"

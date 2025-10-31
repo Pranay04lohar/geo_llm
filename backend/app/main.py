@@ -1,8 +1,14 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from .routers import query_router
-from .services.roi_parser import roi_parser
+import sys
+from pathlib import Path
+
+# Ensure project root (backend) is on sys.path so 'app' package is importable
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.routers import query_router
+from app.services.roi_parser import roi_parser
 
 """This is the main entry point for the monolithic backend service that combines:
 - Core LLM Agent (orchestration)
@@ -189,53 +195,42 @@ def parse_query(query: str = Query(..., description="The query string to parse")
     locations = roi_parser(query)
     return {"found_locations": locations}
 
-# Register routers
-app.include_router(query_router.router, prefix="/query")
+# ============================================================================
+# Register Monolithic Routers
+# ============================================================================
+logger.info("📦 Loading routers...")
 
-# Include Search Service routes
 try:
-    from .search_service.main import app as search_app
-    for route in search_app.routes:
-        if hasattr(route, 'path') and hasattr(route, 'endpoint'):
-            # Skip root and duplicate endpoints
-            if route.path not in ['/', '/openapi.json', '/docs', '/redoc', '/health']:
-                app.routes.append(route)
-    print("✅ Search service routes loaded")
+    from app.routers import query_router
+    app.include_router(query_router.router, prefix="/api", tags=["query"])
+    logger.info("✅ Query router loaded")
 except Exception as e:
-    print(f"⚠️ Search service not available: {e}")
+    logger.error(f"❌ Failed to load query router: {e}")
 
-# Include GEE Service routes
 try:
-    from .gee_service.main import app as gee_app
-    for route in gee_app.routes:
-        if hasattr(route, 'path') and hasattr(route, 'endpoint'):
-            # Skip root and duplicate health endpoints
-            if route.path not in ['/', '/openapi.json', '/docs', '/redoc', '/health']:
-                app.routes.append(route)
-    print("✅ GEE service routes loaded")
+    from app.routers import rag_router
+    app.include_router(rag_router.router, prefix="/api/rag", tags=["rag"])
+    logger.info("✅ RAG router loaded")
 except Exception as e:
-    print(f"⚠️ GEE service not available: {e}")
+    logger.error(f"❌ Failed to load RAG router: {e}")
 
-# Include RAG Service routes
 try:
-    from .rag_service.dynamic_rag.app.main import app as rag_app
-    for route in rag_app.routes:
-        if hasattr(route, 'path') and hasattr(route, 'endpoint'):
-            # Skip root and duplicate endpoints, keep /api/v1 prefix
-            if route.path not in ['/', '/openapi.json', '/docs', '/redoc', '/health']:
-                app.routes.append(route)
-    print("✅ RAG service routes loaded")
+    from app.routers import search_router
+    app.include_router(search_router.router, prefix="/api/search", tags=["search"])
+    logger.info("✅ Search router loaded")
 except Exception as e:
-    print(f"⚠️ RAG service not available: {e}")
+    logger.error(f"❌ Failed to load search router: {e}")
 
-# Include Core LLM Agent routes
-try:
-    from .services.core_llm_agent.core_agent_api import app as agent_app
-    for route in agent_app.routes:
-        if hasattr(route, 'path') and hasattr(route, 'endpoint'):
-            # Skip root and duplicate endpoints
-            if route.path not in ['/', '/openapi.json', '/docs', '/redoc', '/health']:
-                app.routes.append(route)
-    print("✅ Core LLM Agent routes loaded")
-except Exception as e:
-    print(f"⚠️ Core LLM Agent not available: {e}")
+
+# ============================================================================
+# Run Server
+# ============================================================================
+if __name__ == "__main__":
+    import uvicorn
+    logger.info("Starting uvicorn server on 0.0.0.0:8000")
+    uvicorn.run(
+        app,
+        host=settings.HOST,
+        port=settings.PORT,
+        log_level="info"
+    )
