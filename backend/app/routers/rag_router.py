@@ -139,6 +139,16 @@ async def upload_documents(
         )
 
 
+# Backward-compat route to match old frontend path: /api/rag/api/v1/upload-temp
+@router.post("/api/v1/upload-temp", response_model=UploadResponse)
+async def upload_documents_compat(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    session_id: Optional[str] = Form(None)
+):
+    return await upload_documents(request, files, session_id)
+
+
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session_info(session_id: str, request: Request):
     """
@@ -258,7 +268,7 @@ async def query_documents(request_data: DirectRAGQueryRequest, request: Request)
         result = await rag_store.query(
             query=request_data.query,
             session_id=request_data.session_id,
-            k=request_data.top_k
+            top_k=request_data.top_k
         )
         
         if result.get("success"):

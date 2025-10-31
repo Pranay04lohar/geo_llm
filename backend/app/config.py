@@ -135,6 +135,54 @@ def get_gee_config() -> dict:
     }
 
 
-# Legacy compatibility exports
-REDIS_CONFIG = get_redis_config()
+# ============================================================================
+# RAG Service Constants (for compatibility with RAGStore)
+# ============================================================================
+
+# Redis connection configuration
+REDIS_CONFIG = {
+    "url": settings.REDIS_URL,
+    "password": settings.REDIS_PASSWORD,
+    "max_connections": 10,
+    "retry_on_timeout": True,
+    "decode_responses": True
+}
+
+# File processing configuration
+FILE_PROCESSING_CONFIG = {
+    "max_size_bytes": 100 * 1024 * 1024,  # 100 MB
+    "allowed_extensions": [".pdf", ".txt", ".docx", ".md"],
+    "chunk_size": settings.CHUNK_SIZE,
+    "chunk_overlap": settings.CHUNK_OVERLAP
+}
+
+# Embedding configuration  
+EMBEDDING_CONFIG = {
+    "model_name": settings.EMBEDDING_MODEL,
+    "use_gpu": settings.USE_GPU,
+    "batch_size": 32,
+    "dimension": 384  # all-MiniLM-L6-v2 dimension
+}
+
+# Session configuration
+SESSION_CONFIG = {
+    "ttl_seconds": settings.SESSION_TTL,
+    "quota_ttl_seconds": 86400,  # 24 hours
+    "max_files_per_user": 20
+}
+
+
+def get_redis_key_user_quota(user_id: str) -> str:
+    """Generate Redis key for user quota tracking."""
+    return f"user:{user_id}:upload_count"
+
+
+def get_redis_key_session_metadata(session_id: str) -> str:
+    """Generate Redis key for session metadata."""
+    return f"session:{session_id}:metadata"
+
+
+def get_redis_key_session_ttl(session_id: str) -> str:
+    """Generate Redis key for session TTL tracking."""
+    return f"session:{session_id}:ttl"
 
