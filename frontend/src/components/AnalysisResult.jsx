@@ -473,7 +473,8 @@ export default function AnalysisResult({ content }) {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                lng: lngLat.lng,
+                analysis_type: analysisType,
+                lon: lngLat.lng,
                 lat: lngLat.lat,
                 startDate: "2024-01-01",
                 endDate: "2024-08-31",

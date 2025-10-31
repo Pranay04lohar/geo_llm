@@ -25,50 +25,74 @@ logger = logging.getLogger(__name__)
 class ServiceDispatcher:
     """Dispatcher for routing requests to appropriate services."""
     
-    def __init__(self):
-        """Initialize the ServiceDispatcher."""
+    def __init__(self, rag_store=None):
+        """Initialize the ServiceDispatcher.
+        
+        Args:
+            rag_store: RAGStore instance for document Q&A (optional)
+        """
+        self.rag_store = rag_store
         self.services_initialized = False
         self._init_services()
     
     def _init_services(self):
         """Initialize service connections and imports."""
         try:
-            # Import services - these should already exist
-            from app.search_service.integration_client import call_search_service_for_analysis
-            self.search_service = call_search_service_for_analysis
-            
-            # Check if GEE services are available
+            # ================================================================
+            # GEE Services - Direct imports (no HTTP)
+            # ================================================================
             try:
-                from app.gee_service.services.ndvi_service import NDVIService
-                from app.gee_service.services.lst_service import LSTService
+                from app.services.gee import (
+                    NDVIService,
+                    LSTService,
+                    LULCService,
+                    WaterService,
+                    ROIHandler
+                )
                 self.ndvi_service = NDVIService
                 self.lst_service = LSTService
+                self.lulc_service = LULCService
+                self.water_service = WaterService
+                self.roi_handler = ROIHandler()
                 self.gee_services_available = True
-                logger.info("GEE services available for direct integration")
+                logger.info("✅ GEE services loaded (direct imports)")
             except ImportError as e:
-                logger.warning(f"GEE services not available: {e}")
+                logger.warning(f"⚠️ GEE services not available: {e}")
                 self.gee_services_available = False
             
-            # RAG service integration
+            # ================================================================
+            # Search Services - Direct imports (no HTTP)
+            # ================================================================
             try:
-                from ..rag.rag_sync_wrapper import create_sync_rag_service
-                self.rag_service = create_sync_rag_service()
-                # Test if service is actually available
-                self.rag_service_available = self.rag_service.is_available()
-                if self.rag_service_available:
-                    logger.info("RAG service available for integration")
-                else:
-                    logger.warning("RAG service initialized but not available (service may be down)")
+                from app.services.search import (
+                    NominatimClient,
+                    LocationResolver,
+                    ResultProcessor
+                )
+                self.nominatim_client = NominatimClient()
+                self.location_resolver = LocationResolver()
+                self.result_processor = ResultProcessor()
+                self.search_services_available = True
+                logger.info("✅ Search services loaded (direct imports)")
             except ImportError as e:
-                logger.warning(f"RAG service not available: {e}")
+                logger.warning(f"⚠️ Search services not available: {e}")
+                self.search_services_available = False
+            
+            # ================================================================
+            # RAG Service - Direct instance (no HTTP)
+            # ================================================================
+            if self.rag_store:
+                self.rag_service_available = True
+                logger.info("✅ RAG store available (direct instance)")
+            else:
                 self.rag_service_available = False
-                self.rag_service = None
+                logger.warning("⚠️ RAG store not provided")
             
             self.services_initialized = True
-            logger.info("Service dispatcher initialized successfully")
+            logger.info("✅ Service dispatcher initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize services: {e}")
+            logger.error(f"❌ Failed to initialize services: {e}")
             self.services_initialized = False
     
     def dispatch(
@@ -139,27 +163,23 @@ class ServiceDispatcher:
         """
         logger.info(f"Dispatching to GEE service: {intent_result.analysis_type}")
         
-        # Prepare location data in legacy format for backward compatibility
-        locations_legacy = []
-        if location_result.entities:
-            locations_legacy = [
-                {
-                    "matched_name": entity.matched_name,
-                    "type": entity.type,
-                    "confidence": entity.confidence
-                }
-                for entity in location_result.entities
-            ]
-        
-        # Import ROI handler for geometry resolution
         try:
-            from app.services.gee.roi_handler import ROIHandler
-            roi_handler = ROIHandler()
+            # Prepare location data in legacy format for backward compatibility
+            locations_legacy = []
+            if location_result.entities:
+                locations_legacy = [
+                    {
+                        "matched_name": entity.matched_name,
+                        "type": entity.type,
+                        "confidence": entity.confidence
+                    }
+                    for entity in location_result.entities
+                ]
             
-            # Get ROI geometry
+            # Get ROI geometry using ROI handler
             roi_info = None
             if locations_legacy:
-                roi_info = roi_handler.extract_roi_from_locations(locations_legacy)
+                roi_info = self.roi_handler.extract_roi_from_locations(locations_legacy)
             elif location_result.roi_geometry:
                 # Use already resolved geometry
                 roi_info = {
@@ -170,13 +190,20 @@ class ServiceDispatcher:
             
             if not roi_info:
                 # Fallback to default ROI
-                roi_info = roi_handler.get_default_roi()
+                roi_info = self.roi_handler.get_default_roi()
             
             # Route to specific GEE service based on sub-intent
             analysis_type = intent_result.analysis_type
             
-            # Always use HTTP service calls for reliability
-            return self._call_gee_http_service(analysis_type, roi_info, query)
+            # DEBUG: Log intent classification results
+            logger.info(f"🎯 Intent Classification Results:")
+            logger.info(f"   Service Type: {intent_result.service_type}")
+            logger.info(f"   GEE Sub-Intent: {intent_result.gee_sub_intent}")
+            logger.info(f"   Analysis Type: {analysis_type}")
+            logger.info(f"   Confidence: {intent_result.confidence}")
+            
+            # Call GEE services directly (no HTTP)
+            return self._call_gee_service_direct(analysis_type, roi_info, query)
                 
         except Exception as e:
             logger.error(f"Error in GEE service dispatch: {e}")
@@ -266,13 +293,13 @@ class ServiceDispatcher:
             logger.error(f"Error calling LST service: {e}")
             return self._error_response(f"LST service error: {str(e)}")
     
-    def _call_gee_http_service(
+    def _call_gee_service_direct(
         self, 
         analysis_type: str, 
         roi_info: Dict[str, Any], 
         query: str
     ) -> Dict[str, Any]:
-        """Call GEE service via HTTP.
+        """Call GEE service directly (no HTTP).
         
         Args:
             analysis_type: Type of analysis (ndvi, lulc, lst, etc.)
@@ -280,10 +307,8 @@ class ServiceDispatcher:
             query: Original query for context
             
         Returns:
-            GEE HTTP service response
+            GEE service response
         """
-        import requests
-        
         try:
             # Get base service URL from config
             from app.config_urls import get_service_url
@@ -349,48 +374,82 @@ class ServiceDispatcher:
             
             # Calculate timeout based on area size
             area_km2 = roi_info.get("area_km2", 0)
-            timeout = self._calculate_timeout_for_area(area_km2, analysis_type)
-            # Cap timeouts to avoid very long stalls during development; separate connect vs read timeouts
-            connect_timeout = 10
-            read_timeout = min(timeout, 120)
-            
-            # Check if area is too large for analysis
             if area_km2 > 35000:  # Areas larger than 35k km² are rejected
                 logger.warning(f"🚫 AREA TOO LARGE: {area_km2:.0f} km² exceeds 35,000 km² limit")
                 return self._create_area_too_large_response(area_km2, analysis_type, roi_info)
             
             # Log warnings for large area analysis
+            timeout = self._calculate_timeout_for_area(area_km2, analysis_type)
             self._log_area_warnings(area_km2, analysis_type, timeout)
             
-            # Standard single-request processing
-            logger.info(
-                f"➡️  Calling GEE HTTP service {url} with timeout={read_timeout}s (connect={connect_timeout}s), area={area_km2:.0f} km²"
-            )
-            response = requests.post(
-                url,
-                json=payload,
-                timeout=(connect_timeout, read_timeout),
-            )
-            logger.info(f"⬅️  GEE service responded with status {response.status_code}")
-            response.raise_for_status()
-            result = response.json()
+            # Call appropriate GEE service directly
+            logger.info(f"📡 Calling {analysis_type.upper()} service directly (area={area_km2:.0f} km²)")
             
-            # GEE services return data directly, not wrapped in success/error
+            if analysis_type == "ndvi":
+                result = self.ndvi_service.analyze_ndvi(
+                    geometry=roi_info["geometry"],
+                    start_date="2023-06-01",
+                    end_date="2023-08-31",
+                    cloud_threshold=30,
+                    scale=30,
+                    max_pixels=int(2e8),
+                    include_time_series=False,
+                    exact_computation=False
+                )
+            elif analysis_type == "lst":
+                result = self.lst_service.analyze_lst_with_polygon(
+                    roi_data=roi_info,
+                    start_date="2024-01-01",
+                    end_date="2024-08-31",
+                    include_uhi=True,
+                    include_time_series=False,
+                    scale=1000,
+                    max_pixels=int(5e7),
+                    exact_computation=False
+                )
+            elif analysis_type == "water":
+                water_instance = self.water_service()
+                result = water_instance.analyze_water_presence(
+                    roi=roi_info["geometry"],
+                    year=2023,
+                    threshold=20,
+                    include_seasonal=True
+                )
+            elif analysis_type == "lulc":
+                result = self.lulc_service.analyze_dynamic_world(
+                    geometry=roi_info["geometry"],
+                    start_date="2023-01-01",
+                    end_date="2023-12-31",
+                    confidence_threshold=0.3,
+                    scale=20,
+                    max_pixels=int(5e8),
+                    exact_computation=False,
+                    include_median_vis=False
+                )
+            else:
+                # Default to LULC
+                result = self.lulc_service.analyze_dynamic_world(
+                    geometry=roi_info["geometry"],
+                    start_date="2023-01-01",
+                    end_date="2023-12-31",
+                    confidence_threshold=0.5,
+                    scale=30,
+                    max_pixels=int(1e9),
+                    exact_computation=False,
+                    include_median_vis=False
+                )
+            
+            logger.info(f"✅ {analysis_type.upper()} service completed successfully")
+            
+            # Format and return response
             return self._format_gee_response(result, analysis_type, roi_info)
                 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP error calling GEE service: {e}")
-            # Create a basic error response with analysis_data for consistency
-            error_response = self._error_response(f"GEE service connection failed: {str(e)}")
-            error_response["analysis_data"] = {
-                "analysis_type": analysis_type,
-                "error": str(e),
-                "tile_url": None
-            }
-            return error_response
         except Exception as e:
-            logger.error(f"Error calling GEE HTTP service: {e}")
-            # Create a basic error response with analysis_data for consistency
+            logger.error(f"❌ Error calling GEE service directly: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Create error response with analysis_data for consistency
             error_response = self._error_response(f"GEE service error: {str(e)}")
             error_response["analysis_data"] = {
                 "analysis_type": analysis_type,
@@ -530,13 +589,14 @@ class ServiceDispatcher:
             query: Original user query
             intent_result: Intent classification result
             location_result: Location parsing result
+            rag_session_id: RAG session ID for document context
             
         Returns:
             RAG service response with grounded answer and sources
         """
-        logger.info("Dispatching to RAG service for document-based analysis")
+        logger.info("📚 Dispatching to RAG service for document-based analysis")
         
-        if not self.rag_service_available:
+        if not self.rag_service_available or not self.rag_store:
             # Fallback response when RAG service is not available
             location_names = [entity.matched_name for entity in location_result.entities]
             location_text = f"related to {', '.join(location_names)} " if location_names else ""
@@ -553,7 +613,7 @@ class ServiceDispatcher:
                     f"   • Policy and regulation information\n"
                     f"   • Historical data and context\n"
                     f"   • Factual question answering\n\n"
-                    f"🔧 Please ensure the RAG service is running and try again."
+                    f"🔧 Please ensure RAG store is initialized."
                 ),
                 "roi": None,
                 "evidence": ["rag_service:unavailable"],
@@ -562,23 +622,35 @@ class ServiceDispatcher:
             }
         
         try:
-            # Call the synchronous RAG service wrapper
-            response = self.rag_service.ask(
-                query=query,
-                intent_result=intent_result,
-                location_result=location_result,
-                k=5,
-                temperature=0.7,
-                session_id=rag_session_id
+            # Call RAG store directly (no HTTP)
+            import asyncio
+            
+            # Create an event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Query the RAG store
+            response = loop.run_until_complete(
+                self.rag_store.query(
+                    query=query,
+                    session_id=rag_session_id,
+                    k=5
+                )
             )
             
-            logger.info(f"RAG service response received with confidence: {response.get('confidence', 0.0)}")
+            logger.info(f"✅ RAG service response received with confidence: {response.get('confidence', 0.0)}")
             return response
             
         except Exception as e:
-            logger.error(f"Error calling RAG service: {e}")
+            logger.error(f"❌ Error calling RAG service: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
             # Fallback to search service on error
-            logger.info("Falling back to search service due to RAG error")
+            logger.info("⚠️  Falling back to search service due to RAG error")
             return self._dispatch_search(query, intent_result, location_result)
     
     def _dispatch_search(
@@ -587,7 +659,7 @@ class ServiceDispatcher:
         intent_result: IntentResult, 
         location_result: LocationParseResult
     ) -> Dict[str, Any]:
-        """Dispatch to Search service.
+        """Dispatch to Search service (direct imports, no HTTP).
         
         Args:
             query: Original user query
@@ -597,13 +669,17 @@ class ServiceDispatcher:
         Returns:
             Search service response
         """
-        logger.info("Dispatching to Search service")
+        logger.info("🔍 Dispatching to Search service (direct)")
+        
+        if not self.search_services_available:
+            logger.warning("⚠️  Search services not available, returning fallback")
+            return self._fallback_search_response(query, location_result)
         
         try:
-            # Convert location entities to legacy format
-            locations_legacy = []
+            # Convert location entities to dict format
+            locations_data = []
             if location_result.entities:
-                locations_legacy = [
+                locations_data = [
                     {
                         "matched_name": entity.matched_name,
                         "type": entity.type,
@@ -612,24 +688,44 @@ class ServiceDispatcher:
                     for entity in location_result.entities
                 ]
             
-            # Call search service
-            logger.info(f"DEBUG - Calling search service with analysis_type: '{intent_result.analysis_type}'")
-            result = self.search_service(query, locations_legacy, intent_result.analysis_type)
+            # Use Nominatim for location resolution
+            location_info = None
+            if locations_data:
+                primary_location = locations_data[0]
+                logger.info(f"🔍 Resolving location: {primary_location['matched_name']}")
+                location_info = self.nominatim_client.search_location(
+                    primary_location["matched_name"],
+                    primary_location.get("type", "city")
+                )
             
-            # Debug: Log what search service returns
-            logger.info(f"DEBUG - Search service result keys: {list(result.keys()) if result else 'None'}")
-            logger.info(f"DEBUG - Search service evidence: {result.get('evidence', 'NOT_FOUND') if result else 'None'}")
+            # Use ResultProcessor to generate analysis
+            logger.info(f"📝 Generating search-based analysis")
+            
+            # Create simple analysis from location data
+            if location_info:
+                analysis = f"📍 Location Analysis for {location_info.get('display_name', 'Unknown')}\n\n"
+                analysis += f"Coordinates: {location_info.get('coordinates', {})}\n"
+                if location_info.get("area_km2"):
+                    analysis += f"Area: {location_info['area_km2']:.2f} km²\n"
+                analysis += f"\n💡 For detailed geospatial analysis, try queries like:\n"
+                analysis += f"- 'Analyze NDVI for {primary_location['matched_name']}'\n"
+                analysis += f"- 'Show land surface temperature in {primary_location['matched_name']}'\n"
+            else:
+                analysis = f"🔍 Search analysis for: {query}\n\n"
+                analysis += "No specific location data available. Try adding a location to your query."
             
             return {
-                "analysis": result.get("analysis", "Search analysis completed"),
-                "roi": result.get("roi"),
-                "evidence": result.get("evidence", []),
-                "sources": result.get("sources", []),
-                "confidence": result.get("confidence", 0.0)
+                "analysis": analysis,
+                "roi": location_info.get("polygon_geometry") if location_info else None,
+                "evidence": ["search_service:direct_nominatim"],
+                "sources": [],
+                "confidence": 0.7 if location_info else 0.3
             }
             
         except Exception as e:
-            logger.error(f"Error calling search service: {e}")
+            logger.error(f"❌ Error calling search service: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return self._fallback_search_response(query, location_result)
     
     def _format_gee_response(

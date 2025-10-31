@@ -261,19 +261,16 @@ export default function Home() {
       // Call backend search service (uses sophisticated NominatimClient)
       const SEARCH_SERVICE_URL = API_BASE;
 
-      const response = await fetch(
-        `${SEARCH_SERVICE_URL}/search/location-data`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            location_name: location,
-            location_type: "city",
-          }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/api/search/location-data`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          location_name: location,
+          location_type: "city",
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Search service failed: ${response.status}`);
@@ -574,12 +571,12 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_prompt: userPrompt,
-          roi: roi || null,
+          query: userPrompt,
+          roi: originalROI || roi || null,
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -688,10 +685,11 @@ export default function Home() {
                 }, 2000); // Wait 2 seconds before showing final result
               }
             } catch (parseError) {
-              console.error("Error parsing COT step:", parseError);
+              console.error("Error parsing step data:", parseError);
             }
           }
         }
+        // Close while loop
       }
     } catch (error) {
       console.error("COT streaming failed:", error);

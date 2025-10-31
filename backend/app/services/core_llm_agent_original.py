@@ -228,7 +228,7 @@ def llm_extract_locations_openrouter(user_query: str) -> List[Dict[str, Any]]:
 # Default models (override via env):
 # OPENROUTER_INTENT_MODEL, OPENROUTER_PLANNER_MODEL
 # These can be set to any OpenRouter model slug. Defaults target Google Gemma 2 9B.
-MODEL_INTENT = os.environ.get("OPENROUTER_INTENT_MODEL", "mistralai/mistral-7b-instruct:free")
+MODEL_INTENT = os.environ.get("OPENROUTER_INTENT_MODEL", "openai/gpt-oss-20b:free")
 MODEL_PLANNER = os.environ.get("OPENROUTER_PLANNER_MODEL", MODEL_INTENT)
 
 
