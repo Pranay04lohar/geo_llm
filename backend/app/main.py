@@ -79,9 +79,13 @@ async def lifespan(app: FastAPI):
         # ========================================================================
         logger.info("🌍 Initializing Google Earth Engine...")
         try:
-            import ee
-            ee.Initialize()
-            logger.info("✅ Google Earth Engine initialized successfully")
+            # Use lightweight initializer in app.services.gee (no extra imports)
+            from app.services.gee import initialize_gee
+            if initialize_gee():
+                logger.info("✅ Google Earth Engine initialized successfully")
+            else:
+                logger.error("❌ GEE initialization returned False")
+                logger.warning("⚠️  GEE services may not work properly")
         except Exception as e:
             logger.error(f"❌ Failed to initialize GEE: {e}")
             logger.warning("⚠️  GEE services may not work properly")
@@ -159,7 +163,29 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Ensure headers are exposed for CORS
 )
+
+# Azure-specific middleware to disable buffering on all streaming responses
+@app.middleware("http")
+async def disable_buffering_middleware(request, call_next):
+    """
+    Azure-specific middleware to aggressively disable response buffering.
+    This is critical for Server-Sent Events (SSE) streaming to work on Azure.
+    """
+    response = await call_next(request)
+    
+    # Only apply to streaming endpoints
+    if "/stream" in str(request.url) or request.url.path.endswith("/stream"):
+        response.headers["X-Accel-Buffering"] = "no"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Connection"] = "keep-alive"
+        logger.debug(f"Applied anti-buffering headers to {request.url.path}")
+    
+    return response
 
 @app.get("/")
 async def root():

@@ -20,44 +20,59 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Simplified GEE initialization - supports both file path and JSON string
 def initialize_gee():
-    """Initialize Google Earth Engine with service account authentication"""
+    """
+    Initialize Google Earth Engine using service account credentials.
+    
+    Tries credentials in this order:
+    1. GOOGLE_APPLICATION_CREDENTIALS_JSON (inline JSON string)
+    2. GOOGLE_APPLICATION_CREDENTIALS (file path to JSON)
+    
+    Returns True if initialization succeeded, False otherwise.
+    """
     try:
         import ee
         import json
         import os
         
-        # Try to get credentials from environment
-        creds_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        
-        if creds_json:
-            # Use JSON string from environment variable
-            logger.info("🔑 Using GEE credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON")
-            credentials_dict = json.loads(creds_json)
+        # 1. Try to get the inline JSON string
+        creds_json_string = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        if creds_json_string:
+            logger.info("🔑 Initializing GEE from GOOGLE_APPLICATION_CREDENTIALS_JSON env var...")
+            credentials_dict = json.loads(creds_json_string)
             credentials = ee.ServiceAccountCredentials(
                 credentials_dict['client_email'],
-                key_data=creds_json
+                key_data=creds_json_string
             )
             ee.Initialize(credentials)
-        elif creds_path:
-            # Use file path from environment variable
-            logger.info(f"🔑 Using GEE credentials from file: {creds_path}")
-            with open(creds_path, 'r') as f:
+            logger.info("✅ GEE initialized successfully (from JSON string).")
+            return True
+        
+        # 2. If no JSON string, try to get the file path
+        creds_file_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if creds_file_path:
+            logger.info(f"🔑 Initializing GEE from GOOGLE_APPLICATION_CREDENTIALS file: {creds_file_path}")
+            
+            # Read the file to get the client_email
+            with open(creds_file_path, 'r') as f:
                 credentials_dict = json.load(f)
+            
             credentials = ee.ServiceAccountCredentials(
                 credentials_dict['client_email'],
-                creds_path
+                creds_file_path  # The method can take the file path directly
             )
             ee.Initialize(credentials)
-        else:
-            # Fall back to default credentials (for local development)
-            logger.info("🔑 Using default GEE credentials")
-            ee.Initialize()
+            logger.info("✅ GEE initialized successfully (from file path).")
+            return True
         
-        logger.info("✅ GEE initialized successfully")
-        return True
+        # 3. No credentials found - explicit failure (no fallback for cloud deployment)
+        logger.error("❌ GEE initialization failed: No credentials found.")
+        logger.error("❌ Set either GOOGLE_APPLICATION_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS env var.")
+        return False
+        
     except Exception as e:
-        logger.error(f"❌ Failed to initialize GEE: {e}")
+        logger.error(f"❌ GEE initialization failed with exception: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 # Configure logging first

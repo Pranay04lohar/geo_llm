@@ -157,6 +157,8 @@ class SimpleStepProcessor:
     
     async def process_water_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process water analysis using existing working endpoint"""
+        import gc
+        water_service = None
         try:
             # Debug: Log received ROI structure
             logger.info(f"🔍 [WATER] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
@@ -183,7 +185,7 @@ class SimpleStepProcessor:
             try:
                 # Use the water service directly instead of HTTP requests
                 from app.services.gee.water_service import WaterService
-                water_service = WaterService()
+                water_service = WaterService()  # Track for cleanup
                 
                 # Call the analysis method directly with optimized parameters
                 analysis_data = water_service.analyze_water_presence(
@@ -252,9 +254,17 @@ class SimpleStepProcessor:
                 "progress": 0,
                 "details": "Check server logs for details"
             }
+        finally:
+            # PHASE 1 FIX: Force cleanup of water service resources
+            logger.debug("🧹 [WATER] Cleaning up processor resources")
+            if water_service:
+                del water_service
+            gc.collect()
+            logger.debug("✅ [WATER] Cleanup completed")
     
     async def process_lst_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process LST analysis using existing working endpoint"""
+        import gc
         try:
             # Debug: Log received ROI structure
             logger.info(f"🔍 [LST] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
@@ -367,9 +377,15 @@ class SimpleStepProcessor:
                 "progress": 0,
                 "details": "Check server logs for details"
             }
+        finally:
+            # PHASE 1 FIX: Force cleanup of LST analysis resources
+            logger.debug("🧹 [LST] Cleaning up processor resources")
+            gc.collect()
+            logger.debug("✅ [LST] Cleanup completed")
     
     async def process_ndvi_analysis_steps(self, roi: Dict, user_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Process NDVI analysis using existing working endpoint"""
+        import gc
         try:
             # Debug: Log received ROI structure
             logger.info(f"🔍 [NDVI] Received ROI - type: {roi.get('type')}, coords_rings: {len(roi.get('coordinates', []))}, first_ring_points: {len(roi.get('coordinates', [[]])[0])}")
@@ -494,6 +510,11 @@ class SimpleStepProcessor:
                 "progress": 0,
                 "details": "Check server logs for details"
             }
+        finally:
+            # PHASE 1 FIX: Force cleanup of NDVI analysis resources
+            logger.debug("🧹 [NDVI] Cleaning up processor resources")
+            gc.collect()
+            logger.debug("✅ [NDVI] Cleanup completed")
     
     def _simplify_roi_for_streaming(self, roi: dict) -> dict:
         """
