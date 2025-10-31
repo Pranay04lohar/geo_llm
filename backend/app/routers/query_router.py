@@ -204,26 +204,90 @@ class StreamQueryRequest(BaseModel):
 
 
 async def _stream_steps(roi: Dict[str, Any], user_prompt: str) -> AsyncGenerator[bytes, None]:
-    """Yield SSE lines from the existing SimpleStepProcessor."""
+    """Yield SSE lines from the existing SimpleStepProcessor with Azure-compatible streaming."""
     import json
     import logging as _logging
+    import asyncio
+    import time
 
+    stream_start_time = time.time()
+    steps_sent = 0
+    has_final_result = False
+    
     try:
+        _logging.info("=" * 80)
+        _logging.info("🚀 [AZURE-DEBUG] Starting SSE stream")
+        _logging.info(f"   Query: {user_prompt[:100]}...")
+        _logging.info(f"   ROI type: {roi.get('type', 'unknown')}")
+        _logging.info("=" * 80)
+        
         # Import the already working step processor
         from app.services.core_llm_agent.simple_step_processor import SimpleStepProcessor
 
         processor = SimpleStepProcessor()
+        
+        # Send initial keep-alive comment to establish connection
+        _logging.info("📡 Sending initial keep-alive to establish connection")
+        yield ": keep-alive\n\n".encode("utf-8")
 
+        last_heartbeat = asyncio.get_event_loop().time()
+        
         async for step in processor.process_analysis_steps(roi, user_prompt):
-            payload = f"data: {json.dumps(step)}\n\n".encode("utf-8")
-            yield payload
+            steps_sent += 1
+            step_num = step.get("step", "?")
+            step_status = step.get("status", "?")
+            step_progress = step.get("progress", 0)
+            
+            _logging.info(f"📊 [AZURE-DEBUG] Sending step {step_num} - Status: {step_status}, Progress: {step_progress}%")
+            
+            # Check if this step contains final_result
+            if "final_result" in step:
+                has_final_result = True
+                final_result_size = len(json.dumps(step.get("final_result", {})))
+                _logging.info(f"🎯 [AZURE-DEBUG] Step {step_num} contains final_result (size: {final_result_size} bytes)")
+                _logging.info(f"   Final result keys: {list(step.get('final_result', {}).keys())}")
+            
+            # Send the actual step data
+            try:
+                payload = f"data: {json.dumps(step)}\n\n".encode("utf-8")
+                _logging.debug(f"   Payload size: {len(payload)} bytes")
+                yield payload
+                _logging.info(f"✅ [AZURE-DEBUG] Step {step_num} sent successfully")
+            except Exception as json_err:
+                _logging.error(f"❌ [AZURE-DEBUG] Failed to serialize step {step_num}: {json_err}")
+                raise
+            
+            # Azure Fix: Add periodic heartbeat to keep connection alive
+            current_time = asyncio.get_event_loop().time()
+            if current_time - last_heartbeat > 15:  # Every 15 seconds
+                _logging.debug("💓 Sending keep-alive heartbeat")
+                yield ": heartbeat\n\n".encode("utf-8")
+                last_heartbeat = current_time
 
         # Safety: if processor ended without a final step, emit a soft-complete
-        soft_complete = {"step": 1, "status": "complete", "message": "Analysis complete", "progress": 100}
-        yield f"data: {json.dumps(soft_complete)}\n\n".encode("utf-8")
+        if not has_final_result:
+            _logging.warning("⚠️ [AZURE-DEBUG] No final_result detected in stream, sending soft-complete")
+            soft_complete = {"step": 1, "status": "complete", "message": "Analysis complete", "progress": 100}
+            yield f"data: {json.dumps(soft_complete)}\n\n".encode("utf-8")
+        
+        # Final flush to ensure all data is sent
+        stream_duration = time.time() - stream_start_time
+        _logging.info("=" * 80)
+        _logging.info("✅ [AZURE-DEBUG] Streaming completed successfully")
+        _logging.info(f"   Total steps sent: {steps_sent}")
+        _logging.info(f"   Duration: {stream_duration:.2f}s")
+        _logging.info(f"   Has final result: {has_final_result}")
+        _logging.info("=" * 80)
 
     except Exception as e:  # pragma: no cover – best-effort streaming
-        _logging.error(f"Streaming failed: {e}")
+        stream_duration = time.time() - stream_start_time
+        _logging.error("=" * 80)
+        _logging.error(f"❌ [AZURE-DEBUG] Streaming failed after {stream_duration:.2f}s")
+        _logging.error(f"   Steps sent before failure: {steps_sent}")
+        _logging.error(f"   Error: {e}")
+        _logging.error("=" * 80)
+        import traceback
+        _logging.error(traceback.format_exc())
         err = {"step": 0, "status": "error", "message": str(e)}
         yield f"data: {json.dumps(err)}\n\n".encode("utf-8")
 
@@ -236,6 +300,8 @@ async def process_query_stream(request_data: StreamQueryRequest, request: Reques
     an ROI from /api/search/location-data and the natural-language query.
 
     If ROI is missing, we emit an immediate error step to keep behavior explicit.
+    
+    Azure-Compatible: Includes proper headers to prevent buffering and connection drops.
     """
     import json
 
@@ -248,11 +314,33 @@ async def process_query_stream(request_data: StreamQueryRequest, request: Reques
                 "message": "ROI is required for streaming analysis. Resolve location first.",
             }
             yield f"data: {json.dumps(err)}\n\n".encode("utf-8")
-        return StreamingResponse(_error_gen(), media_type="text/event-stream")
+        return StreamingResponse(
+            _error_gen(), 
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
 
+    logger.info(f"🚀 Starting streaming analysis for query: {request_data.query[:100]}...")
+    
+    # Azure-compatible streaming response with anti-buffering headers
     return StreamingResponse(
         _stream_steps(request_data.roi, request_data.query),
         media_type="text/event-stream",
+        headers={
+            # Critical Azure headers to prevent buffering
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # Nginx/Azure buffering control
+            "Connection": "keep-alive",
+            "Content-Encoding": "none",  # Prevent compression buffering
+            # CORS headers for cross-origin requests
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        }
     )
 
 
