@@ -4,7 +4,7 @@ import os
 from .routers import query_router
 from .services.roi_parser import roi_parser
 
-This is the main entry point for the monolithic backend service that combines:
+"""This is the main entry point for the monolithic backend service that combines:
 - Core LLM Agent (orchestration)
 - GEE Services (geospatial analysis)
 - Search Services (location resolution, web search)
