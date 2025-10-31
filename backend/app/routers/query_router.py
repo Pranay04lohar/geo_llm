@@ -209,10 +209,12 @@ async def _stream_steps(roi: Dict[str, Any], user_prompt: str) -> AsyncGenerator
     import logging as _logging
     import asyncio
     import time
+    import gc
 
     stream_start_time = time.time()
     steps_sent = 0
     has_final_result = False
+    processor = None
     
     try:
         _logging.info("=" * 80)
@@ -290,6 +292,15 @@ async def _stream_steps(roi: Dict[str, Any], user_prompt: str) -> AsyncGenerator
         _logging.error(traceback.format_exc())
         err = {"step": 0, "status": "error", "message": str(e)}
         yield f"data: {json.dumps(err)}\n\n".encode("utf-8")
+    
+    finally:
+        # PHASE 1 FIX: Force cleanup of stream resources
+        _logging.info("🧹 [AZURE-DEBUG] Cleaning up stream resources...")
+        if processor:
+            del processor
+        # Force garbage collection to free Earth Engine resources
+        gc.collect()
+        _logging.info("✅ [AZURE-DEBUG] Stream resources cleaned up successfully")
 
 
 @router.post("/query/stream")
