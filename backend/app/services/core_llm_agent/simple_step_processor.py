@@ -291,7 +291,7 @@ class SimpleStepProcessor:
                     roi_data={"polygon_geometry": roi},  # Use correct key name
                     start_date="2023-06-01",
                     end_date="2023-08-31",
-                    include_uhi=True,
+                    include_uhi=False,  # Disabled for performance (adds 10-30s per analysis)
                     include_time_series=False,
                     scale=params["scale"],
                     max_pixels=int(params["maxPixels"]),
