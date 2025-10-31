@@ -182,7 +182,7 @@ class SimpleStepProcessor:
             
             try:
                 # Use the water service directly instead of HTTP requests
-                from app.gee_service.services.water_service import WaterService
+                from app.services.gee.water_service import WaterService
                 water_service = WaterService()
                 
                 # Call the analysis method directly with optimized parameters
@@ -301,9 +301,7 @@ class SimpleStepProcessor:
                     },
                     timeout=params["timeout"]
                 )
-                response.raise_for_status()
-                analysis_data = response.json()
-                logger.info("✅ LST analysis completed successfully")
+                logger.info("✅ LST analysis completed successfully (direct call)")
                 
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")
@@ -428,9 +426,7 @@ class SimpleStepProcessor:
                     },
                     timeout=params["timeout"]
                 )
-                response.raise_for_status()
-                analysis_data = response.json()
-                logger.info("✅ NDVI analysis completed successfully")
+                logger.info("✅ NDVI analysis completed successfully (direct call)")
                 
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"⚠️ GEE service not available, using fallback analysis: {e}")

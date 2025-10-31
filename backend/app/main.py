@@ -4,10 +4,139 @@ import os
 from .routers import query_router
 from .services.roi_parser import roi_parser
 
+This is the main entry point for the monolithic backend service that combines:
+- Core LLM Agent (orchestration)
+- GEE Services (geospatial analysis)
+- Search Services (location resolution, web search)
+- RAG Services (document Q&A)
+
+All services are integrated as direct Python imports (no HTTP calls between services).
+"""
+
+import logging
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.config import settings
+
+# Setup logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager - handles startup and shutdown.
+    
+    Startup:
+    - Initialize RAG store (Redis, embeddings, FAISS)
+    - Initialize Core LLM Agent with all services
+    - Initialize GEE client
+    
+    Shutdown:
+    - Cleanup RAG store
+    - Close connections
+    """
+    logger.info("=" * 80)
+    logger.info(f"🚀 Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    logger.info("=" * 80)
+    
+    try:
+        # ========================================================================
+        # Initialize RAG Store
+        # ========================================================================
+        logger.info("📚 Initializing RAG store...")
+        try:
+            from app.services.rag.rag_store import RAGStore
+            app.state.rag_store = RAGStore()
+            await app.state.rag_store.initialize()
+            logger.info("✅ RAG store initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize RAG store: {e}")
+            logger.warning("⚠️  Continuing without RAG functionality")
+            app.state.rag_store = None
+        
+        # ========================================================================
+        # Initialize Google Earth Engine
+        # ========================================================================
+        logger.info("🌍 Initializing Google Earth Engine...")
+        try:
+            import ee
+            ee.Initialize()
+            logger.info("✅ Google Earth Engine initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize GEE: {e}")
+            logger.warning("⚠️  GEE services may not work properly")
+        
+        # ========================================================================
+        # Initialize Core LLM Agent
+        # ========================================================================
+        logger.info("🤖 Initializing Core LLM Agent...")
+        try:
+            from app.services.core_llm_agent.agent import CoreLLMAgent
+            app.state.core_agent = CoreLLMAgent(
+                enable_debug=settings.DEBUG,
+                rag_store=app.state.rag_store
+            )
+            logger.info("✅ Core LLM Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Core LLM Agent: {e}")
+            raise
+        
+        # ========================================================================
+        # Startup Complete
+        # ========================================================================
+        logger.info("=" * 80)
+        logger.info("✅ GeoLLM Backend started successfully!")
+        logger.info(f"📡 Listening on {settings.HOST}:{settings.PORT}")
+        logger.info(f"📖 API Documentation: http://{settings.HOST}:{settings.PORT}/docs")
+        logger.info("=" * 80)
+        
+        yield
+        
+        # ========================================================================
+        # Shutdown
+        # ========================================================================
+        logger.info("🛑 Shutting down GeoLLM Backend...")
+        
+        if app.state.rag_store:
+            try:
+                await app.state.rag_store.cleanup()
+                logger.info("✅ RAG store cleaned up")
+            except Exception as e:
+                logger.error(f"❌ Error cleaning up RAG store: {e}")
+        
+        logger.info("👋 Shutdown complete")
+        
+    except Exception as e:
+        logger.error(f"💥 Fatal error during startup: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise
+
+
+# ============================================================================
+# Create FastAPI Application
+# ============================================================================
 app = FastAPI(
-    title="GeoLLM MVP",
-    description="Modular monolith architecture for geospatial chat system",
-    version="0.1"
+    title=settings.APP_NAME,
+    description="Monolithic geospatial analysis service with LLM-powered query processing",
+    version=settings.APP_VERSION,
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # CORS configuration: read allowed origins or regex from environment
@@ -27,8 +156,20 @@ app.add_middleware(
 )
 
 @app.get("/")
-def read_root():
-    return {"message": "Welcome to the GeoSpatial LLM API"}
+async def root():
+    """Root endpoint with service information"""
+    return {
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "status": "healthy",
+        "endpoints": {
+            "main_query": "/api/query",
+            "rag_upload": "/api/rag/upload",
+            "rag_query": "/api/rag/query",
+            "health": "/health",
+            "docs": "/docs"
+        }
+    }
 
 @app.get("/health")
 def health_check():
