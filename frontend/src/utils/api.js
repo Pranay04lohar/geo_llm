@@ -109,5 +109,3 @@ export async function getLastDetailed(sessionId) {
   console.warn("getLastDetailed() is deprecated in monolithic architecture");
   return null;
 }
-
-// old deleteSession removed; use the RAG version above
