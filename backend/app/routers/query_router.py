@@ -252,7 +252,14 @@ async def _stream_steps(roi: Dict[str, Any], user_prompt: str) -> AsyncGenerator
             # Send the actual step data
             try:
                 payload = f"data: {json.dumps(step)}\n\n".encode("utf-8")
-                _logging.debug(f"   Payload size: {len(payload)} bytes")
+                payload_size = len(payload)
+                
+                # Special logging for Step 6 (tiny flush message)
+                if step_num == 6:
+                    _logging.info(f"🔄 [AZURE-DEBUG] Step 6 (flush) payload size: {payload_size} bytes ({'✅ TINY' if payload_size < 1000 else '⚠️ LARGE'})")
+                else:
+                    _logging.debug(f"   Payload size: {len(payload)} bytes")
+                
                 yield payload
                 _logging.info(f"✅ [AZURE-DEBUG] Step {step_num} sent successfully")
             except Exception as json_err:
