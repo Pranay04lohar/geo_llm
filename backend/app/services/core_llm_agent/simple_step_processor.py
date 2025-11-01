@@ -218,10 +218,23 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating tile URLs and interactive features"
             }
-            await asyncio.sleep(6)
+            
+            # Active delay with progress updates to keep Azure connection alive
+            logger.info("⏳ [WATER] Starting 6s delay with heartbeat progress updates")
+            for i in range(6):  # 6 seconds, update every 1 second
+                await asyncio.sleep(1)
+                # Send progress update every second to keep connection alive (80-99%)
+                yield {
+                    "step": 4,
+                    "status": "processing",
+                    "message": "Generating interactive map visualization...",
+                    "progress": 80 + int((i + 1) * 3.17),  # 83%, 86%, 90%, 93%, 96%, 99% (not 100%)
+                    "details": f"Finalizing visualization ({i+1}/6)"
+                }
+            logger.info("✅ [WATER] Delay complete, preparing Step 5")
             
             # Step 5: Complete
-            logger.info(f"🎯 Preparing final result with analysis_data keys: {list(analysis_data.keys()) if analysis_data else 'None'}")
+            logger.info(f"🎯 [WATER] Preparing final result with analysis_data keys: {list(analysis_data.keys()) if analysis_data else 'None'}")
             
             # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
             simplified_roi = self._simplify_roi_for_streaming(roi)
@@ -234,7 +247,8 @@ class SimpleStepProcessor:
                 "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
                 "service_used": "GEE"
             }
-            logger.info(f"🎯 Final result created with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            logger.info(f"🎯 [WATER] Final result created with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            logger.info("📤 [WATER] Sending Step 5 to client now...")
             
             yield {
                 "step": 5,
@@ -244,6 +258,7 @@ class SimpleStepProcessor:
                 "details": "Interactive map ready with hover sampling",
                 "final_result": final_result
             }
+            logger.info("✅ [WATER] Step 5 sent successfully")
             
         except Exception as e:
             logger.error(f"Error in water analysis steps: {e}")
@@ -338,17 +353,32 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating temperature map tiles"
             }
-            await asyncio.sleep(6)
+            
+            # Active delay with progress updates to keep Azure connection alive
+            logger.info("⏳ [LST] Starting 6s delay with heartbeat progress updates")
+            for i in range(6):  # 6 seconds, update every 1 second
+                await asyncio.sleep(1)
+                # Send progress update every second to keep connection alive (80-99%)
+                yield {
+                    "step": 4,
+                    "status": "processing",
+                    "message": "Generating thermal visualization...",
+                    "progress": 80 + int((i + 1) * 3.17),  # 83%, 86%, 90%, 93%, 96%, 99% (not 100%)
+                    "details": f"Finalizing visualization ({i+1}/6)"
+                }
+            logger.info("✅ [LST] Delay complete, preparing Step 5")
             
             # Step 5: Complete
             # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
+            logger.info("🎯 [LST] Starting Step 5 preparation")
             simplified_roi = self._simplify_roi_for_streaming(roi)
-            logger.info(f"🎯 LST final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            logger.info(f"🎯 [LST] Final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
             
             # Extract tile URL with debug logging
             tile_url = analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url")
-            logger.info(f"🗺️ LST tile_url extracted: {tile_url[:100] if tile_url else 'NONE'}")
-            logger.info(f"📦 LST response keys: {list(analysis_data.keys())}")
+            logger.info(f"🗺️ [LST] Tile_url extracted: {tile_url[:100] if tile_url else 'NONE'}")
+            logger.info(f"📦 [LST] Response keys: {list(analysis_data.keys())}")
+            logger.info("📤 [LST] Sending Step 5 to client now...")
             
             yield {
                 "step": 5,
@@ -459,12 +489,26 @@ class SimpleStepProcessor:
                 "progress": 80,
                 "details": "Creating NDVI map tiles"
             }
-            await asyncio.sleep(6)
+            
+            # Active delay with progress updates to keep Azure connection alive
+            logger.info("⏳ [NDVI] Starting 6s delay with heartbeat progress updates")
+            for i in range(6):  # 6 seconds, update every 1 second
+                await asyncio.sleep(1)
+                # Send progress update every second to keep connection alive (80-99%)
+                yield {
+                    "step": 4,
+                    "status": "processing",
+                    "message": "Generating vegetation visualization...",
+                    "progress": 80 + int((i + 1) * 3.17),  # 83%, 86%, 90%, 93%, 96%, 99% (not 100%)
+                    "details": f"Finalizing visualization ({i+1}/6)"
+                }
+            logger.info("✅ [NDVI] Delay complete, preparing Step 5")
             
             # Step 5: Complete
             # Simplify ROI for streaming (reduce polygon points to avoid JSON serialization hang)
+            logger.info("🎯 [NDVI] Starting Step 5 preparation")
             simplified_roi = self._simplify_roi_for_streaming(roi)
-            logger.info(f"🎯 NDVI final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
+            logger.info(f"🎯 [NDVI] Final result with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
             
             # Extract tile URL with debug logging (same as LST), with NDVI-specific fallback
             tile_url = (
@@ -482,6 +526,7 @@ class SimpleStepProcessor:
                 or {}
             )
             total_area_km2 = analysis_data.get("roi_area_km2", analysis_data.get("area_km2", 0))
+            logger.info("📤 [NDVI] Sending Step 5 to client now...")
             
             yield {
                 "step": 5,
@@ -500,6 +545,7 @@ class SimpleStepProcessor:
                     "service_used": "GEE"
                 }
             }
+            logger.info("✅ [NDVI] Step 5 sent successfully")
             
         except Exception as e:
             logger.error(f"Error in NDVI analysis steps: {e}")
