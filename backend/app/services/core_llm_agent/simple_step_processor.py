@@ -248,30 +248,53 @@ class SimpleStepProcessor:
                 "service_used": "GEE"
             }
             logger.info(f"🎯 [WATER] Final result created with simplified ROI ({self._count_roi_points(simplified_roi)} points)")
-            logger.info("📤 [WATER] Sending Step 5 to client now...")
             
+            # CRITICAL FIX: Split Step 5 into smaller chunks to avoid Azure buffering
+            # Step 5a: Metadata + stats (no ROI) - should be <10KB
+            logger.info("📤 [WATER] Sending Step 5a (metadata + stats) to client now...")
+            final_result_part1 = {
+                "analysis_type": final_result["analysis_type"],
+                "tile_url": final_result["tile_url"],
+                "stats": final_result["stats"],
+                "service_used": final_result["service_used"]
+                # ROI sent separately in Step 5b
+            }
+            yield {
+                "step": 5,
+                "status": "processing",
+                "message": "Water analysis complete!",
+                "progress": 100,
+                "details": "Delivering results...",
+                "final_result": final_result_part1,
+                "partial": True  # Signal that ROI is coming in next step
+            }
+            logger.info("✅ [WATER] Step 5a sent successfully")
+            
+            # Step 5b: ROI only - smaller chunk
+            await asyncio.sleep(0.1)  # Tiny delay between chunks
+            logger.info("📤 [WATER] Sending Step 5b (ROI) to client now...")
             yield {
                 "step": 5,
                 "status": "completed",
                 "message": "Water analysis complete!",
                 "progress": 100,
                 "details": "Interactive map ready with hover sampling",
-                "final_result": final_result
+                "final_result": {"roi": final_result["roi"]},
+                "partial": True,  # Merge with previous final_result
+                "complete": True  # This completes the final_result
             }
-            logger.info("✅ [WATER] Step 5 sent successfully")
+            logger.info("✅ [WATER] Step 5b sent successfully")
             
-            # CRITICAL FIX: Send TINY flush message (no final_result) to force Azure to deliver Step 5
-            # Step 6 is intentionally small (<1KB) to bypass Azure buffering threshold
-            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            # Step 6: TINY flush message to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5b is processed
             yield {
                 "step": 6,
                 "status": "completed",
                 "message": "Complete",
                 "progress": 100,
                 "flush": True
-                # NO final_result here - it's too large, Step 5 must get through
             }
-            logger.info("🔄 [WATER] Tiny flush message sent (<1KB) to force Azure to deliver Step 5")
+            logger.info("🔄 [WATER] Tiny flush message sent (<1KB) to force Azure to deliver Steps 5a/5b")
             
         except Exception as e:
             logger.error(f"Error in water analysis steps: {e}")
@@ -391,39 +414,56 @@ class SimpleStepProcessor:
             tile_url = analysis_data.get("urlFormat") or analysis_data.get("visualization", {}).get("tile_url")
             logger.info(f"🗺️ [LST] Tile_url extracted: {tile_url[:100] if tile_url else 'NONE'}")
             logger.info(f"📦 [LST] Response keys: {list(analysis_data.keys())}")
-            logger.info("📤 [LST] Sending Step 5 to client now...")
             
+            # CRITICAL FIX: Split Step 5 into smaller chunks to avoid Azure buffering
+            # Step 5a: Metadata + stats (no ROI) - should be <10KB
+            logger.info("📤 [LST] Sending Step 5a (metadata + stats) to client now...")
+            final_result_part1 = {
+                "analysis_type": "lst",
+                "tile_url": tile_url,
+                "stats": {
+                    **analysis_data.get("mapStats", {}),
+                    "total_area_km2": analysis_data.get("roi_area_km2", 0)
+                },
+                "service_used": "GEE"
+                # ROI sent separately in Step 5b
+            }
+            yield {
+                "step": 5,
+                "status": "processing",
+                "message": "LST analysis complete!",
+                "progress": 100,
+                "details": "Delivering results...",
+                "final_result": final_result_part1,
+                "partial": True  # Signal that ROI is coming in next step
+            }
+            logger.info("✅ [LST] Step 5a sent successfully")
+            
+            # Step 5b: ROI only - smaller chunk
+            await asyncio.sleep(0.1)  # Tiny delay between chunks
+            logger.info("📤 [LST] Sending Step 5b (ROI) to client now...")
             yield {
                 "step": 5,
                 "status": "completed",
                 "message": "LST analysis complete!",
                 "progress": 100,
                 "details": "Interactive thermal map ready",
-                "final_result": {
-                    "analysis_type": "lst",
-                    "tile_url": tile_url,
-                    "stats": {
-                        **analysis_data.get("mapStats", {}),
-                        "total_area_km2": analysis_data.get("roi_area_km2", 0)
-                    },
-                    "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
-                    "service_used": "GEE"
-                }
+                "final_result": {"roi": simplified_roi},
+                "partial": True,  # Merge with previous final_result
+                "complete": True  # This completes the final_result
             }
-            logger.info("✅ [LST] Step 5 sent successfully")
+            logger.info("✅ [LST] Step 5b sent successfully")
             
-            # CRITICAL FIX: Send TINY flush message (no final_result) to force Azure to deliver Step 5
-            # Step 6 is intentionally small (<1KB) to bypass Azure buffering threshold
-            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            # Step 6: TINY flush message to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5b is processed
             yield {
                 "step": 6,
                 "status": "completed",
                 "message": "Complete",
                 "progress": 100,
                 "flush": True
-                # NO final_result here - it's too large, Step 5 must get through
             }
-            logger.info("🔄 [LST] Tiny flush message sent (<1KB) to force Azure to deliver Step 5")
+            logger.info("🔄 [LST] Tiny flush message sent (<1KB) to force Azure to deliver Steps 5a/5b")
             
         except Exception as e:
             logger.error(f"Error in LST analysis steps: {e}")
@@ -553,39 +593,56 @@ class SimpleStepProcessor:
                 or {}
             )
             total_area_km2 = analysis_data.get("roi_area_km2", analysis_data.get("area_km2", 0))
-            logger.info("📤 [NDVI] Sending Step 5 to client now...")
             
+            # CRITICAL FIX: Split Step 5 into smaller chunks to avoid Azure buffering
+            # Step 5a: Metadata + stats (no ROI) - should be <10KB
+            logger.info("📤 [NDVI] Sending Step 5a (metadata + stats) to client now...")
+            final_result_part1 = {
+                "analysis_type": "ndvi",
+                "tile_url": tile_url,
+                "stats": {
+                    **ndvi_stats,
+                    "total_area_km2": total_area_km2
+                },
+                "service_used": "GEE"
+                # ROI sent separately in Step 5b
+            }
+            yield {
+                "step": 5,
+                "status": "processing",
+                "message": "Vegetation analysis complete!",
+                "progress": 100,
+                "details": "Delivering results...",
+                "final_result": final_result_part1,
+                "partial": True  # Signal that ROI is coming in next step
+            }
+            logger.info("✅ [NDVI] Step 5a sent successfully")
+            
+            # Step 5b: ROI only - smaller chunk
+            await asyncio.sleep(0.1)  # Tiny delay between chunks
+            logger.info("📤 [NDVI] Sending Step 5b (ROI) to client now...")
             yield {
                 "step": 5,
                 "status": "completed",
                 "message": "Vegetation analysis complete!",
                 "progress": 100,
                 "details": "Interactive vegetation map ready",
-                "final_result": {
-                    "analysis_type": "ndvi",
-                    "tile_url": tile_url,
-                    "stats": {
-                        **ndvi_stats,
-                        "total_area_km2": total_area_km2
-                    },
-                    "roi": simplified_roi,  # Use simplified ROI to avoid streaming hang
-                    "service_used": "GEE"
-                }
+                "final_result": {"roi": simplified_roi},
+                "partial": True,  # Merge with previous final_result
+                "complete": True  # This completes the final_result
             }
-            logger.info("✅ [NDVI] Step 5 sent successfully")
+            logger.info("✅ [NDVI] Step 5b sent successfully")
             
-            # CRITICAL FIX: Send TINY flush message (no final_result) to force Azure to deliver Step 5
-            # Step 6 is intentionally small (<1KB) to bypass Azure buffering threshold
-            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            # Step 6: TINY flush message to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5b is processed
             yield {
                 "step": 6,
                 "status": "completed",
                 "message": "Complete",
                 "progress": 100,
                 "flush": True
-                # NO final_result here - it's too large, Step 5 must get through
             }
-            logger.info("🔄 [NDVI] Tiny flush message sent (<1KB) to force Azure to deliver Step 5")
+            logger.info("🔄 [NDVI] Tiny flush message sent (<1KB) to force Azure to deliver Steps 5a/5b")
             
         except Exception as e:
             logger.error(f"Error in NDVI analysis steps: {e}")

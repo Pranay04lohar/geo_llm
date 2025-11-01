@@ -521,6 +521,9 @@ export default function Home() {
     setCotSteps([]);
     setCurrentStep(0);
 
+    // Track accumulated final_result for partial chunks
+    let accumulatedFinalResult = {};
+
     // Debug: Log ROI being sent to backend
     console.log("🚀 [SEND] ROI to backend:", {
       type: roi?.type,
@@ -640,54 +643,80 @@ export default function Home() {
 
               // If this is the final step, replace COT with result
               if (stepData.final_result) {
-                // Debug: Log ROI received from backend
-                console.log("📥 [RECEIVE] ROI from backend:", {
-                  type: stepData.final_result.roi?.type,
-                  coordinates_rings:
-                    stepData.final_result.roi?.coordinates?.length,
-                  first_ring_points:
-                    stepData.final_result.roi?.coordinates?.[0]?.length,
-                  display_name: stepData.final_result.roi?.display_name,
-                  full_roi: stepData.final_result.roi,
-                });
+                // Handle partial final_results (split chunks from Azure)
+                if (stepData.partial) {
+                  // Merge current partial result with accumulated
+                  accumulatedFinalResult = {
+                    ...accumulatedFinalResult,
+                    ...stepData.final_result,
+                  };
 
-                // Compare with original
-                console.log("🔍 [COMPARE] Original vs Received:");
-                console.log(
-                  "  Original points:",
-                  originalROI?.coordinates?.[0]?.length
-                );
-                console.log(
-                  "  Received points:",
-                  stepData.final_result.roi?.coordinates?.[0]?.length
-                );
-
-                // If ROI was simplified, use original
-                if (
-                  originalROI?.coordinates?.[0]?.length > 10 &&
-                  stepData.final_result.roi?.coordinates?.[0]?.length <= 5
-                ) {
-                  console.warn(
-                    "⚠️ ROI was simplified to bounding box! Using original polygon instead."
-                  );
-                  stepData.final_result.roi = originalROI;
+                  // If complete, process the merged result
+                  if (stepData.complete) {
+                    stepData.final_result = accumulatedFinalResult;
+                    accumulatedFinalResult = {}; // Reset for next query
+                    delete stepData.partial;
+                    delete stepData.complete;
+                    // Continue to process complete final_result below
+                  } else {
+                    // Still waiting for more chunks, don't process final_result yet
+                    // But continue processing this step (add to cotSteps, update UI, etc.)
+                    stepData.final_result = null; // Don't process incomplete final_result
+                    delete stepData.partial; // Clear flag so it doesn't show as partial in UI
+                  }
                 }
 
-                setTimeout(() => {
-                  const formattedResult = formatFinalResult(
-                    stepData.final_result
+                // Only process final_result if it's complete (not null from partial handling)
+                if (stepData.final_result) {
+                  // Debug: Log ROI received from backend
+                  console.log("📥 [RECEIVE] ROI from backend:", {
+                    type: stepData.final_result.roi?.type,
+                    coordinates_rings:
+                      stepData.final_result.roi?.coordinates?.length,
+                    first_ring_points:
+                      stepData.final_result.roi?.coordinates?.[0]?.length,
+                    display_name: stepData.final_result.roi?.display_name,
+                    full_roi: stepData.final_result.roi,
+                  });
+
+                  // Compare with original
+                  console.log("🔍 [COMPARE] Original vs Received:");
+                  console.log(
+                    "  Original points:",
+                    originalROI?.coordinates?.[0]?.length
                   );
-                  setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === cotMessageId
-                        ? {
-                            type: "assistant",
-                            content: formattedResult,
-                          }
-                        : msg
-                    )
+                  console.log(
+                    "  Received points:",
+                    stepData.final_result.roi?.coordinates?.[0]?.length
                   );
-                }, 2000); // Wait 2 seconds before showing final result
+
+                  // If ROI was simplified, use original
+                  if (
+                    originalROI?.coordinates?.[0]?.length > 10 &&
+                    stepData.final_result.roi?.coordinates?.[0]?.length <= 5
+                  ) {
+                    console.warn(
+                      "⚠️ ROI was simplified to bounding box! Using original polygon instead."
+                    );
+                    stepData.final_result.roi = originalROI;
+                  }
+
+                  setTimeout(() => {
+                    const formattedResult = formatFinalResult(
+                      stepData.final_result
+                    );
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === cotMessageId
+                          ? {
+                              type: "assistant",
+                              content: formattedResult,
+                            }
+                          : msg
+                      )
+                    );
+                  }, 2000); // Wait 2 seconds before showing final result
+                }
               }
             } catch (parseError) {
               console.error("Error parsing step data:", parseError);
