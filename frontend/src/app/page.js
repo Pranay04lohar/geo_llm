@@ -602,7 +602,35 @@ export default function Home() {
                 progress: stepData.progress,
                 has_final_result: !!stepData.final_result,
                 flush: stepData.flush || false,
+                partial: stepData.partial || false,
+                complete: stepData.complete || false,
               });
+
+              // CRITICAL DEBUG: Log full final_result data if present
+              if (stepData.final_result) {
+                console.log(
+                  "🎯 [FRONTEND] Step",
+                  stepData.step,
+                  "final_result keys:",
+                  Object.keys(stepData.final_result)
+                );
+                console.log(
+                  "🎯 [FRONTEND] Step",
+                  stepData.step,
+                  "final_result size:",
+                  JSON.stringify(stepData.final_result).length,
+                  "bytes"
+                );
+                if (stepData.final_result.roi) {
+                  console.log(
+                    "🎯 [FRONTEND] Step",
+                    stepData.step,
+                    "has ROI with",
+                    stepData.final_result.roi.coordinates?.[0]?.length || 0,
+                    "points"
+                  );
+                }
+              }
 
               setMessages((prev) =>
                 prev.map((msg) =>
@@ -645,14 +673,35 @@ export default function Home() {
               if (stepData.final_result) {
                 // Handle partial final_results (split chunks from Azure)
                 if (stepData.partial) {
+                  console.log(
+                    "🔀 [FRONTEND] Merging partial result. Current accumulated keys:",
+                    Object.keys(accumulatedFinalResult)
+                  );
+                  console.log(
+                    "🔀 [FRONTEND] New partial keys:",
+                    Object.keys(stepData.final_result)
+                  );
+
                   // Merge current partial result with accumulated
                   accumulatedFinalResult = {
                     ...accumulatedFinalResult,
                     ...stepData.final_result,
                   };
 
+                  console.log(
+                    "🔀 [FRONTEND] Merged result keys:",
+                    Object.keys(accumulatedFinalResult)
+                  );
+                  console.log(
+                    "🔀 [FRONTEND] Complete flag:",
+                    stepData.complete
+                  );
+
                   // If complete, process the merged result
                   if (stepData.complete) {
+                    console.log(
+                      "✅ [FRONTEND] All chunks received, processing complete final_result"
+                    );
                     stepData.final_result = accumulatedFinalResult;
                     accumulatedFinalResult = {}; // Reset for next query
                     delete stepData.partial;
@@ -660,7 +709,9 @@ export default function Home() {
                     // Continue to process complete final_result below
                   } else {
                     // Still waiting for more chunks, don't process final_result yet
-                    // But continue processing this step (add to cotSteps, update UI, etc.)
+                    console.log(
+                      "⏳ [FRONTEND] Waiting for more chunks (Step 5b)..."
+                    );
                     stepData.final_result = null; // Don't process incomplete final_result
                     delete stepData.partial; // Clear flag so it doesn't show as partial in UI
                   }
@@ -668,6 +719,20 @@ export default function Home() {
 
                 // Only process final_result if it's complete (not null from partial handling)
                 if (stepData.final_result) {
+                  // Explicit handler for final_result processing
+                  console.log(
+                    "🎯 [FRONTEND] Processing complete final_result:",
+                    {
+                      analysis_type: stepData.final_result.analysis_type,
+                      has_tile_url: !!stepData.final_result.tile_url,
+                      has_stats: !!stepData.final_result.stats,
+                      has_roi: !!stepData.final_result.roi,
+                      roi_points:
+                        stepData.final_result.roi?.coordinates?.[0]?.length ||
+                        0,
+                    }
+                  );
+
                   // Debug: Log ROI received from backend
                   console.log("📥 [RECEIVE] ROI from backend:", {
                     type: stepData.final_result.roi?.type,

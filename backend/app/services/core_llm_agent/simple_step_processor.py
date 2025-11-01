@@ -5,6 +5,7 @@ and show real-time progress steps.
 """
 
 import asyncio
+import json
 import logging
 import os
 from typing import Dict, Any, AsyncGenerator
@@ -270,7 +271,11 @@ class SimpleStepProcessor:
             }
             logger.info("✅ [WATER] Step 5a sent successfully")
             
-            # Step 5b: ROI only - smaller chunk
+            # Step 5b: ROI only - CRITICAL: Further simplify ROI to <5KB for Azure
+            ultra_simplified_roi = self._ultra_simplify_roi_for_azure(simplified_roi)
+            roi_size = len(json.dumps(ultra_simplified_roi))
+            logger.info(f"📏 [WATER] Step 5b ROI size: {roi_size} bytes ({'✅ OK' if roi_size < 5000 else '⚠️ LARGE'})")
+            
             await asyncio.sleep(0.1)  # Tiny delay between chunks
             logger.info("📤 [WATER] Sending Step 5b (ROI) to client now...")
             yield {
@@ -279,7 +284,7 @@ class SimpleStepProcessor:
                 "message": "Water analysis complete!",
                 "progress": 100,
                 "details": "Interactive map ready with hover sampling",
-                "final_result": {"roi": final_result["roi"]},
+                "final_result": {"roi": ultra_simplified_roi},
                 "partial": True,  # Merge with previous final_result
                 "complete": True  # This completes the final_result
             }
@@ -439,7 +444,11 @@ class SimpleStepProcessor:
             }
             logger.info("✅ [LST] Step 5a sent successfully")
             
-            # Step 5b: ROI only - smaller chunk
+            # Step 5b: ROI only - CRITICAL: Further simplify ROI to <5KB for Azure
+            ultra_simplified_roi = self._ultra_simplify_roi_for_azure(simplified_roi)
+            roi_size = len(json.dumps(ultra_simplified_roi))
+            logger.info(f"📏 [LST] Step 5b ROI size: {roi_size} bytes ({'✅ OK' if roi_size < 5000 else '⚠️ LARGE'})")
+            
             await asyncio.sleep(0.1)  # Tiny delay between chunks
             logger.info("📤 [LST] Sending Step 5b (ROI) to client now...")
             yield {
@@ -448,7 +457,7 @@ class SimpleStepProcessor:
                 "message": "LST analysis complete!",
                 "progress": 100,
                 "details": "Interactive thermal map ready",
-                "final_result": {"roi": simplified_roi},
+                "final_result": {"roi": ultra_simplified_roi},
                 "partial": True,  # Merge with previous final_result
                 "complete": True  # This completes the final_result
             }
@@ -618,7 +627,11 @@ class SimpleStepProcessor:
             }
             logger.info("✅ [NDVI] Step 5a sent successfully")
             
-            # Step 5b: ROI only - smaller chunk
+            # Step 5b: ROI only - CRITICAL: Further simplify ROI to <5KB for Azure
+            ultra_simplified_roi = self._ultra_simplify_roi_for_azure(simplified_roi)
+            roi_size = len(json.dumps(ultra_simplified_roi))
+            logger.info(f"📏 [NDVI] Step 5b ROI size: {roi_size} bytes ({'✅ OK' if roi_size < 5000 else '⚠️ LARGE'})")
+            
             await asyncio.sleep(0.1)  # Tiny delay between chunks
             logger.info("📤 [NDVI] Sending Step 5b (ROI) to client now...")
             yield {
@@ -627,7 +640,7 @@ class SimpleStepProcessor:
                 "message": "Vegetation analysis complete!",
                 "progress": 100,
                 "details": "Interactive vegetation map ready",
-                "final_result": {"roi": simplified_roi},
+                "final_result": {"roi": ultra_simplified_roi},
                 "partial": True,  # Merge with previous final_result
                 "complete": True  # This completes the final_result
             }
@@ -761,3 +774,38 @@ class SimpleStepProcessor:
             return 0
         
         return len(coordinates[0])
+    
+    def _ultra_simplify_roi_for_azure(self, roi: dict) -> dict:
+        """
+        Ultra-aggressive simplification for Azure streaming.
+        Reduces ROI to ~200 points to keep payload <5KB (below Azure buffering threshold).
+        """
+        if not roi or not isinstance(roi, dict):
+            return roi
+        
+        roi_type = roi.get('type')
+        coordinates = roi.get('coordinates')
+        
+        if roi_type != 'Polygon' or not coordinates or not coordinates[0]:
+            return roi
+        
+        outer_ring = coordinates[0]
+        num_points = len(outer_ring)
+        
+        # Ultra-aggressive limit: 200 points (~4-5KB JSON) to avoid Azure buffering
+        MAX_POINTS_FOR_AZURE = 200
+        
+        if num_points <= MAX_POINTS_FOR_AZURE:
+            return roi
+        
+        # Use aggressive simplification
+        simplified_ring = self._adaptive_simplify_polygon(outer_ring, MAX_POINTS_FOR_AZURE)
+        
+        logger.info(f"Ultra-simplified ROI for Azure: {num_points} → {len(simplified_ring)} points")
+        
+        return {
+            'type': 'Polygon',
+            'coordinates': [simplified_ring],
+            'display_name': roi.get('display_name'),
+            'center': roi.get('center')
+        }
