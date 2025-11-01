@@ -2,6 +2,8 @@
 
 A comprehensive geospatial analysis platform that combines AI-powered query processing with satellite data analysis, document retrieval, and real-time visualization. GeoLLM leverages Google Earth Engine, LLM-based intent classification, and vector embeddings to provide intelligent geospatial insights.
 
+[Live Site](https://geo-llm-eosin.vercel.app/)
+
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![Next.js](https://img.shields.io/badge/next.js-14-black.svg)
