@@ -593,7 +593,13 @@ export default function Home() {
           if (line.startsWith("data: ")) {
             try {
               const stepData = JSON.parse(line.slice(6));
-              console.log("📊 Received step data:", stepData);
+              console.log("📊 [FRONTEND] Received step data:", {
+                step: stepData.step,
+                status: stepData.status,
+                progress: stepData.progress,
+                has_final_result: !!stepData.final_result,
+                flush: stepData.flush || false,
+              });
 
               setMessages((prev) =>
                 prev.map((msg) =>

@@ -260,6 +260,18 @@ class SimpleStepProcessor:
             }
             logger.info("✅ [WATER] Step 5 sent successfully")
             
+            # CRITICAL FIX: Send small flush message with final_result backup to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            yield {
+                "step": 6,
+                "status": "completed",
+                "message": "Analysis finalized",
+                "progress": 100,
+                "flush": True,  # Signal to force flush
+                "final_result": final_result  # Backup: Include final_result in case Step 5 was dropped
+            }
+            logger.info("🔄 [WATER] Flush message with final_result backup sent to force Azure delivery")
+            
         except Exception as e:
             logger.error(f"Error in water analysis steps: {e}")
             yield {
@@ -397,6 +409,31 @@ class SimpleStepProcessor:
                     "service_used": "GEE"
                 }
             }
+            logger.info("✅ [LST] Step 5 sent successfully")
+            
+            # Store final_result for backup in Step 6
+            lst_final_result = {
+                "analysis_type": "lst",
+                "tile_url": tile_url,
+                "stats": {
+                    **analysis_data.get("mapStats", {}),
+                    "total_area_km2": analysis_data.get("roi_area_km2", 0)
+                },
+                "roi": simplified_roi,
+                "service_used": "GEE"
+            }
+            
+            # CRITICAL FIX: Send small flush message with final_result backup to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            yield {
+                "step": 6,
+                "status": "completed",
+                "message": "Analysis finalized",
+                "progress": 100,
+                "flush": True,  # Signal to force flush
+                "final_result": lst_final_result  # Backup: Include final_result in case Step 5 was dropped
+            }
+            logger.info("🔄 [LST] Flush message with final_result backup sent to force Azure delivery")
             
         except Exception as e:
             logger.error(f"Error in LST analysis steps: {e}")
@@ -546,6 +583,30 @@ class SimpleStepProcessor:
                 }
             }
             logger.info("✅ [NDVI] Step 5 sent successfully")
+            
+            # Store final_result for backup in Step 6
+            ndvi_final_result = {
+                "analysis_type": "ndvi",
+                "tile_url": tile_url,
+                "stats": {
+                    **ndvi_stats,
+                    "total_area_km2": total_area_km2
+                },
+                "roi": simplified_roi,
+                "service_used": "GEE"
+            }
+            
+            # CRITICAL FIX: Send small flush message with final_result backup to force Azure delivery
+            await asyncio.sleep(0.1)  # Tiny delay to ensure Step 5 is processed
+            yield {
+                "step": 6,
+                "status": "completed",
+                "message": "Analysis finalized",
+                "progress": 100,
+                "flush": True,  # Signal to force flush
+                "final_result": ndvi_final_result  # Backup: Include final_result in case Step 5 was dropped
+            }
+            logger.info("🔄 [NDVI] Flush message with final_result backup sent to force Azure delivery")
             
         except Exception as e:
             logger.error(f"Error in NDVI analysis steps: {e}")
